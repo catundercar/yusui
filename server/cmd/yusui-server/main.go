@@ -11,12 +11,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	agentv1 "github.com/catundercar/yusui/proto/yusui/agent/v1"
+	"github.com/catundercar/yusui/server/internal/agentctl"
 	"github.com/catundercar/yusui/server/internal/agentgw"
 	"github.com/catundercar/yusui/server/internal/auth"
 	"github.com/catundercar/yusui/server/internal/config"
@@ -27,6 +30,7 @@ import (
 	"github.com/catundercar/yusui/server/internal/services"
 	"github.com/catundercar/yusui/server/internal/store"
 	"github.com/catundercar/yusui/server/internal/webshell"
+	"google.golang.org/grpc"
 )
 
 func main() {
@@ -100,13 +104,36 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 	catalog := services.NewCatalog(db.Queries, sealer)
 	catalogH := httpapi.NewCatalogHandler(catalog, logger)
 
-	gw := agentgw.NewMemory(logger)
+	var gw agentgw.Gateway
+	var controller *agentctl.Controller
+	if cfg.AgentGatewayMode == "grpc" {
+		controller = agentctl.New(db, logger, cfg.AgentRegisterToken)
+		gw = controller
+	} else {
+		gw = agentgw.NewMemory(logger)
+	}
 	engine := policy.NewEngine(db, gw, logger, cfg.ServerPeerIPs)
 	ticketH := httpapi.NewTicketHandler(engine)
 
 	shellMgr := webshell.NewManager(db, catalog, cfg.RecordingsDir, logger)
 	engine.SetSessionCloser(shellMgr)
 	webShellH := httpapi.NewWebShellHandler(shellMgr, engine, mgr, logger)
+
+	var grpcSrv *grpc.Server
+	if controller != nil {
+		lis, lerr := net.Listen("tcp", cfg.AgentGRPCAddr)
+		if lerr != nil {
+			return fmt.Errorf("agent grpc listen: %w", lerr)
+		}
+		grpcSrv = grpc.NewServer()
+		agentv1.RegisterAgentControlServer(grpcSrv, controller)
+		go func() {
+			logger.Info("agent gRPC listening", "addr", cfg.AgentGRPCAddr)
+			if err := grpcSrv.Serve(lis); err != nil {
+				logger.Error("agent grpc serve", "err", err)
+			}
+		}()
+	}
 
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
@@ -135,6 +162,9 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 		return err
 	case <-ctx.Done():
 		logger.Info("shutting down")
+		if grpcSrv != nil {
+			grpcSrv.GracefulStop()
+		}
 		shCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		return srv.Shutdown(shCtx)

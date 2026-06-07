@@ -1,0 +1,160 @@
+syntax = "proto3";
+
+package yusui.agent.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/catundercar/yusui/proto/yusui/agent/v1;agentv1";
+
+// AgentControl is the Agent <-> Server protocol (gRPC over mTLS over the NetBird
+// overlay). Proto fields are add-only; deprecated fields are kept (docs/03).
+service AgentControl {
+  // Register is called once at Agent startup to obtain a session token + cert.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  // Control is the long-lived bidirectional stream after registration.
+  rpc Control(stream AgentToServer) returns (stream ServerToAgent);
+}
+
+message RegisterRequest {
+  string project_code = 1;
+  string netbird_peer_id = 2;
+  string hostname = 3;
+  string agent_version = 4;
+  string register_token = 5; // one-time, issued by Server at install (1h)
+  bytes csr = 6;             // mTLS client CSR
+}
+
+message RegisterResponse {
+  string agent_id = 1;
+  bytes signed_cert = 2; // Server CA-signed cert (90d)
+  bytes ca_cert = 3;
+  string session_token = 4;
+  ControlConfig config = 5;
+}
+
+message ControlConfig {
+  uint32 heartbeat_sec = 1;          // default 10
+  uint32 freeze_after_sec = 2;       // default 60
+  uint32 reconcile_interval_sec = 3; // default 300
+}
+
+// ---- upstream (Agent -> Server) ----
+message AgentToServer {
+  oneof msg {
+    Heartbeat heartbeat = 1;
+    AckCommand ack = 2;
+    RuleEvent rule_event = 3;
+    AssetReport asset_report = 4;
+    ReconcileResponse reconcile_resp = 5;
+  }
+}
+
+message Heartbeat {
+  google.protobuf.Timestamp ts = 1;
+  AgentStatus status = 2;
+  uint64 active_rules = 3;
+  string netbird_status = 4;
+}
+
+enum AgentStatus {
+  AGENT_STATUS_UNSPECIFIED = 0;
+  AGENT_STATUS_READY = 1;
+  AGENT_STATUS_DEGRADED = 2;
+  AGENT_STATUS_FROZEN = 3;
+}
+
+message AckCommand {
+  string command_id = 1;
+  AckResult result = 2;
+  string error_msg = 3;
+}
+
+enum AckResult {
+  ACK_RESULT_UNSPECIFIED = 0;
+  ACK_RESULT_OK = 1;
+  ACK_RESULT_FAILED = 2;
+  ACK_RESULT_PARTIAL = 3;
+  ACK_RESULT_SKIPPED = 4;
+}
+
+message RuleEvent {
+  string rule_id = 1;
+  RuleEventKind kind = 2;
+  uint64 packet_count = 3;
+  google.protobuf.Timestamp at = 4;
+}
+
+enum RuleEventKind {
+  RULE_EVENT_KIND_UNSPECIFIED = 0;
+  RULE_EVENT_KIND_APPLIED = 1;
+  RULE_EVENT_KIND_REVOKED = 2;
+  RULE_EVENT_KIND_EXPIRED_LOCAL = 3;
+  RULE_EVENT_KIND_HIT_FIRST = 4;
+  RULE_EVENT_KIND_HIT_LAST = 5;
+}
+
+message AssetReport {
+  repeated AssetCandidate candidates = 1;
+}
+
+message AssetCandidate {
+  string ip = 1;
+  string mac = 2;
+  string hostname_guess = 3;
+  repeated uint32 ports_seen = 4;
+}
+
+// ---- downstream (Server -> Agent) ----
+message ServerToAgent {
+  oneof msg {
+    ApplyRule apply = 1;
+    RevokeRule revoke = 2;
+    ReconcileRequest reconcile = 3;
+    UpdateConfig config = 4;
+    Drain drain = 5;
+  }
+}
+
+message ApplyRule {
+  string command_id = 1;
+  string rule_id = 2;   // YuSui-global; written into the nft element comment
+  string ticket_id = 3;
+  string src_peer_ip = 4 [deprecated = true]; // pre-draft7; kept for N-1 agents
+  repeated string src_peer_ips = 9;           // draft7: multi-source (HA server)
+  string dst_ip = 5;
+  uint32 dst_port = 6;
+  Protocol proto = 7;
+  google.protobuf.Timestamp expires_at = 8;
+}
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_TCP = 1;
+  PROTOCOL_UDP = 2;
+  PROTOCOL_ANY = 3;
+}
+
+message RevokeRule {
+  string command_id = 1;
+  string rule_id = 2;
+  string reason = 3;
+}
+
+message ReconcileRequest {
+  string command_id = 1;
+}
+
+message ReconcileResponse {
+  string command_id = 1;
+  repeated string active_rule_ids = 2;
+}
+
+message UpdateConfig {
+  string command_id = 1;
+  ControlConfig config = 2;
+}
+
+message Drain {
+  string command_id = 1;
+  uint32 graceful_sec = 2;
+}

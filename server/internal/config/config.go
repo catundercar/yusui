@@ -41,24 +41,32 @@ type Config struct {
 	// RecordingsDir is where asciinema cast files are written (v0.1 local FS;
 	// v0.2+ object storage, docs/09 §9.5).
 	RecordingsDir string
+
+	// Agent control plane.
+	AgentGatewayMode   string // "mock" (default) | "grpc" (real Agent over gRPC)
+	AgentGRPCAddr      string // listen addr for the Agent Controller gRPC server
+	AgentRegisterToken string // shared token agents present at Register (dev)
 }
 
 // Load reads configuration from environment variables.
 func Load() (Config, error) {
 	c := Config{
-		DatabaseURL:   os.Getenv("DATABASE_URL"),
-		HTTPAddr:      getenv("HTTP_ADDR", ":8080"),
-		LogLevel:      getenv("LOG_LEVEL", "info"),
-		Env:           getenv("ENV", "dev"),
-		JWTSecret:     os.Getenv("JWT_SECRET"),
-		AccessTTL:     getdur("ACCESS_TTL", 15*time.Minute),
-		RefreshTTL:    getdur("REFRESH_TTL", 7*24*time.Hour),
-		StepUpWindow:  getdur("STEPUP_WINDOW", 30*time.Minute),
-		AdminUsername: getenv("ADMIN_USERNAME", "admin"),
-		AdminPassword: os.Getenv("ADMIN_PASSWORD"),
-		CredentialKey: os.Getenv("CREDENTIAL_KEY"),
-		ServerPeerIPs: splitCSV(os.Getenv("SERVER_PEER_IPS")),
-		RecordingsDir: getenv("RECORDINGS_DIR", "var/recordings"),
+		DatabaseURL:        os.Getenv("DATABASE_URL"),
+		HTTPAddr:           getenv("HTTP_ADDR", ":8080"),
+		LogLevel:           getenv("LOG_LEVEL", "info"),
+		Env:                getenv("ENV", "dev"),
+		JWTSecret:          os.Getenv("JWT_SECRET"),
+		AccessTTL:          getdur("ACCESS_TTL", 15*time.Minute),
+		RefreshTTL:         getdur("REFRESH_TTL", 7*24*time.Hour),
+		StepUpWindow:       getdur("STEPUP_WINDOW", 30*time.Minute),
+		AdminUsername:      getenv("ADMIN_USERNAME", "admin"),
+		AdminPassword:      os.Getenv("ADMIN_PASSWORD"),
+		CredentialKey:      os.Getenv("CREDENTIAL_KEY"),
+		ServerPeerIPs:      splitCSV(os.Getenv("SERVER_PEER_IPS")),
+		RecordingsDir:      getenv("RECORDINGS_DIR", "var/recordings"),
+		AgentGatewayMode:   getenv("AGENT_GATEWAY", "mock"),
+		AgentGRPCAddr:      getenv("AGENT_GRPC_ADDR", ":9090"),
+		AgentRegisterToken: os.Getenv("AGENT_REGISTER_TOKEN"),
 	}
 	if c.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")

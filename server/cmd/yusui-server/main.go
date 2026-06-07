@@ -106,7 +106,7 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 
 	shellMgr := webshell.NewManager(db, catalog, cfg.RecordingsDir, logger)
 	engine.SetSessionCloser(shellMgr)
-	webShellH := httpapi.NewWebShellHandler(shellMgr, engine, logger)
+	webShellH := httpapi.NewWebShellHandler(shellMgr, engine, mgr, logger)
 
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,

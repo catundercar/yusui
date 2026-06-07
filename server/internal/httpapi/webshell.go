@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,12 +23,15 @@ import (
 type WebShellHandler struct {
 	mgr    *webshell.Manager
 	engine *policy.Engine
+	jwt    *auth.Manager
 	logger *slog.Logger
 }
 
-// NewWebShellHandler wires the terminal handler.
-func NewWebShellHandler(mgr *webshell.Manager, engine *policy.Engine, logger *slog.Logger) *WebShellHandler {
-	return &WebShellHandler{mgr: mgr, engine: engine, logger: logger}
+// NewWebShellHandler wires the terminal handler. It self-authenticates (the WS
+// route is outside the header-auth middleware) since browsers can't set headers
+// on WebSocket connections.
+func NewWebShellHandler(mgr *webshell.Manager, engine *policy.Engine, jwt *auth.Manager, logger *slog.Logger) *WebShellHandler {
+	return &WebShellHandler{mgr: mgr, engine: engine, jwt: jwt, logger: logger}
 }
 
 // wsFrame is the length-prefixed JSON message (data is base64 for binary safety).
@@ -45,7 +50,21 @@ type wsFrame struct {
 }
 
 func (h *WebShellHandler) terminal(w http.ResponseWriter, r *http.Request) {
-	p, _ := auth.PrincipalFrom(r.Context())
+	// Self-auth: token from ?access_token= (browser WS) or Authorization header.
+	tok := r.URL.Query().Get("access_token")
+	if tok == "" {
+		if hdr := r.Header.Get("Authorization"); strings.HasPrefix(hdr, "Bearer ") {
+			tok = strings.TrimSpace(strings.TrimPrefix(hdr, "Bearer "))
+		}
+	}
+	claims, err := h.jwt.Parse(tok)
+	if err != nil || claims.Kind != auth.AccessToken {
+		writeErr(w, http.StatusUnauthorized, "invalid or missing token")
+		return
+	}
+	uid, _ := strconv.ParseInt(claims.Subject, 10, 64)
+	p := auth.Principal{UserID: uid, Username: claims.Username, Role: claims.Role, StepUpAt: claims.StepUpAt}
+
 	id, ok := idParam(r)
 	if !ok {
 		writeErr(w, http.StatusBadRequest, "invalid id")
@@ -84,7 +103,6 @@ func (h *WebShellHandler) terminal(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("source") == "api" {
 		source = "api" // M2c: AI will use a capability token that bakes this in
 	}
-	uid := p.UserID
 	attID := h.mgr.AddAttacher(ctx, sess.DBID, &uid, source, p.Username, "primary")
 	defer h.mgr.DetachAttacher(context.Background(), attID)
 

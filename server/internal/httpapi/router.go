@@ -25,6 +25,7 @@ type Deps struct {
 	Ready   Readiness
 	Logger  *slog.Logger
 	Auth    *AuthHandler
+	Catalog *CatalogHandler
 	Manager *auth.Manager
 }
 
@@ -51,6 +52,27 @@ func NewRouter(d Deps) http.Handler {
 			r.Use(auth.Authenticator(d.Manager))
 			r.Get("/me", d.Auth.me)
 			r.Post("/auth/stepup", d.Auth.stepup)
+
+			// Admin CRUD (docs/07 §7.5: project/asset/agent CRUD is admin-only).
+			r.Group(func(r chi.Router) {
+				r.Use(auth.RequireRole("admin"))
+				r.Route("/projects", func(r chi.Router) {
+					r.Post("/", d.Catalog.createProject)
+					r.Get("/", d.Catalog.listProjects)
+					r.Get("/{id}", d.Catalog.getProject)
+				})
+				r.Route("/agents", func(r chi.Router) {
+					r.Post("/", d.Catalog.createAgent)
+					r.Get("/", d.Catalog.listAgents)
+				})
+				r.Route("/assets", func(r chi.Router) {
+					r.Post("/", d.Catalog.createAsset)
+					r.Get("/", d.Catalog.listAssets)
+					r.Get("/{id}", d.Catalog.getAsset)
+					r.Post("/{id}/credentials", d.Catalog.createCredential)
+					r.Get("/{id}/credentials", d.Catalog.listCredentials)
+				})
+			})
 		})
 	})
 	return r

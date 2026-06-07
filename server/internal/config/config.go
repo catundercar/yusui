@@ -28,6 +28,10 @@ type Config struct {
 	// AdminPassword is set, seed an admin account (dev convenience).
 	AdminUsername string
 	AdminPassword string
+
+	// CredentialKey seals asset SSH secrets (AES-GCM; KMS placeholder, docs/07 §7.10).
+	// If empty, serve derives it from JWTSecret (dev only).
+	CredentialKey string
 }
 
 // Load reads configuration from environment variables.
@@ -43,6 +47,7 @@ func Load() (Config, error) {
 		StepUpWindow:  getdur("STEPUP_WINDOW", 30*time.Minute),
 		AdminUsername: getenv("ADMIN_USERNAME", "admin"),
 		AdminPassword: os.Getenv("ADMIN_PASSWORD"),
+		CredentialKey: os.Getenv("CREDENTIAL_KEY"),
 	}
 	if c.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")

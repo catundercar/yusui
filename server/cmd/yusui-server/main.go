@@ -21,6 +21,8 @@ import (
 	"github.com/catundercar/yusui/server/internal/config"
 	"github.com/catundercar/yusui/server/internal/httpapi"
 	"github.com/catundercar/yusui/server/internal/migrate"
+	"github.com/catundercar/yusui/server/internal/secrets"
+	"github.com/catundercar/yusui/server/internal/services"
 	"github.com/catundercar/yusui/server/internal/store"
 )
 
@@ -88,9 +90,18 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 	idp := auth.NewLocalProvider(db.Queries)
 	authH := httpapi.NewAuthHandler(idp, mgr, db.Queries)
 
+	sealer, err := newSealer(cfg, logger)
+	if err != nil {
+		return err
+	}
+	catalog := services.NewCatalog(db.Queries, sealer)
+	catalogH := httpapi.NewCatalogHandler(catalog, logger)
+
 	srv := &http.Server{
-		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(httpapi.Deps{Ready: db, Logger: logger, Auth: authH, Manager: mgr}),
+		Addr: cfg.HTTPAddr,
+		Handler: httpapi.NewRouter(httpapi.Deps{
+			Ready: db, Logger: logger, Auth: authH, Catalog: catalogH, Manager: mgr,
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -148,6 +159,21 @@ func seedAdmin(ctx context.Context, db *store.DB, cfg config.Config, logger *slo
 	}
 	logger.Info("seeded admin user", "username", cfg.AdminUsername)
 	return nil
+}
+
+// newSealer builds the credential sealer; falls back to JWT_SECRET-derived key
+// (dev only) when CREDENTIAL_KEY is unset.
+func newSealer(cfg config.Config, logger *slog.Logger) (*secrets.Sealer, error) {
+	material := cfg.CredentialKey
+	if material == "" {
+		logger.Warn("CREDENTIAL_KEY unset; deriving credential key from JWT_SECRET (dev only)")
+		material = cfg.JWTSecret
+	}
+	key, err := secrets.KeyFromString(material)
+	if err != nil {
+		return nil, err
+	}
+	return secrets.NewSealer(key, "local-v1")
 }
 
 func newLogger(level string) *slog.Logger {

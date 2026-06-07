@@ -18,10 +18,10 @@ const cf = ref<any>({ asset_id: null, ssh_user: "ops-yusui", auth_kind: "passwor
 
 async function loadAll() {
   try {
-    projects.value = await api.listProjects()
-    agents.value = await api.listAgents()
-    assets.value = await api.listAssets()
-    users.value = await api.listUsers()
+    projects.value = (await api.listProjects()) || []
+    agents.value = (await api.listAgents()) || []
+    assets.value = (await api.listAssets()) || []
+    users.value = (await api.listUsers()) || []
   } catch (e: any) {
     ElMessage.error(e.message)
   }

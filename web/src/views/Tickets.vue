@@ -20,9 +20,9 @@ const isApprover = computed(() => ["approver", "admin"].includes(session.user?.r
 async function load() {
   loading.value = true
   try {
-    tickets.value = await api.listTickets()
-    projects.value = await api.listProjects()
-    assets.value = await api.listAssets()
+    tickets.value = (await api.listTickets()) || []
+    projects.value = (await api.listProjects()) || []
+    assets.value = (await api.listAssets()) || []
   } catch (e: any) {
     ElMessage.error(e.message)
   } finally {

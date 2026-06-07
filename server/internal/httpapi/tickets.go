@@ -76,7 +76,7 @@ func (h *TicketHandler) list(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, ts)
+	writeJSON(w, http.StatusOK, orEmpty(ts))
 }
 
 func (h *TicketHandler) get(w http.ResponseWriter, r *http.Request) {

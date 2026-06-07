@@ -66,7 +66,7 @@ func (h *CatalogHandler) listProjects(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, ps)
+	writeJSON(w, http.StatusOK, orEmpty(ps))
 }
 
 func (h *CatalogHandler) getProject(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +109,7 @@ func (h *CatalogHandler) listAgents(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, as)
+	writeJSON(w, http.StatusOK, orEmpty(as))
 }
 
 // ---- assets ----
@@ -141,7 +141,7 @@ func (h *CatalogHandler) listAssets(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, as)
+	writeJSON(w, http.StatusOK, orEmpty(as))
 }
 
 func (h *CatalogHandler) getAsset(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +196,7 @@ func (h *CatalogHandler) listCredentials(w http.ResponseWriter, r *http.Request)
 		h.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, cs)
+	writeJSON(w, http.StatusOK, orEmpty(cs))
 }
 
 // ---- users ----
@@ -227,5 +227,5 @@ func (h *CatalogHandler) listUsers(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, us)
+	writeJSON(w, http.StatusOK, orEmpty(us))
 }

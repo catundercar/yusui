@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/catundercar/yusui/server/internal/auth"
 	"github.com/catundercar/yusui/server/internal/config"
 	"github.com/catundercar/yusui/server/internal/httpapi"
 	"github.com/catundercar/yusui/server/internal/migrate"
@@ -70,15 +71,26 @@ func runMigrate(ctx context.Context, cfg config.Config, logger *slog.Logger) err
 }
 
 func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
+	if err := cfg.RequireServe(); err != nil {
+		return err
+	}
 	db, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer db.Close()
 
+	if err := seedAdmin(ctx, db, cfg, logger); err != nil {
+		return err
+	}
+
+	mgr := auth.NewManager(cfg.JWTSecret, cfg.AccessTTL, cfg.RefreshTTL)
+	idp := auth.NewLocalProvider(db.Queries)
+	authH := httpapi.NewAuthHandler(idp, mgr, db.Queries)
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(db, logger),
+		Handler:           httpapi.NewRouter(httpapi.Deps{Ready: db, Logger: logger, Auth: authH, Manager: mgr}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -102,6 +114,40 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 		defer cancel()
 		return srv.Shutdown(shCtx)
 	}
+}
+
+// seedAdmin creates the first admin account on a fresh DB (dev convenience).
+// No-op unless the users table is empty and ADMIN_PASSWORD is set.
+func seedAdmin(ctx context.Context, db *store.DB, cfg config.Config, logger *slog.Logger) error {
+	if cfg.AdminPassword == "" {
+		return nil
+	}
+	n, err := db.CountUsers(ctx)
+	if err != nil {
+		return fmt.Errorf("seed admin: count users: %w", err)
+	}
+	if n > 0 {
+		return nil
+	}
+	if err := auth.CheckPolicy(cfg.AdminPassword); err != nil {
+		return fmt.Errorf("seed admin: weak ADMIN_PASSWORD: %w", err)
+	}
+	hash, err := auth.HashPassword(cfg.AdminPassword)
+	if err != nil {
+		return err
+	}
+	displayName := "Administrator"
+	if _, err := db.CreateUser(ctx, store.CreateUserParams{
+		Username:     cfg.AdminUsername,
+		DisplayName:  &displayName,
+		Role:         "admin",
+		PasswordHash: &hash,
+		MfaEnabled:   false,
+	}); err != nil {
+		return fmt.Errorf("seed admin: create user: %w", err)
+	}
+	logger.Info("seeded admin user", "username", cfg.AdminUsername)
+	return nil
 }
 
 func newLogger(level string) *slog.Logger {

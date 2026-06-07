@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type Agent struct {
+type YusuiAgent struct {
 	ID              int64              `json:"id"`
 	ProjectID       int64              `json:"project_id"`
 	Role            string             `json:"role"`
@@ -24,7 +24,7 @@ type Agent struct {
 	RegisteredAt    pgtype.Timestamptz `json:"registered_at"`
 }
 
-type Asset struct {
+type YusuiAsset struct {
 	ID              int64              `json:"id"`
 	ProjectID       int64              `json:"project_id"`
 	Name            string             `json:"name"`
@@ -37,7 +37,7 @@ type Asset struct {
 	CommandPolicyID *int64             `json:"command_policy_id"`
 }
 
-type AssetCredential struct {
+type YusuiAssetCredential struct {
 	ID             int64              `json:"id"`
 	AssetID        int64              `json:"asset_id"`
 	SshUser        string             `json:"ssh_user"`
@@ -51,7 +51,7 @@ type AssetCredential struct {
 	IsActive       bool               `json:"is_active"`
 }
 
-type AuditLog struct {
+type YusuiAuditLog struct {
 	ID         int64              `json:"id"`
 	Ts         pgtype.Timestamptz `json:"ts"`
 	ActorType  string             `json:"actor_type"`
@@ -64,7 +64,7 @@ type AuditLog struct {
 	Hash       []byte             `json:"hash"`
 }
 
-type CommandFilterEvent struct {
+type YusuiCommandFilterEvent struct {
 	ID            int64              `json:"id"`
 	SessionID     int64              `json:"session_id"`
 	Ts            pgtype.Timestamptz `json:"ts"`
@@ -76,7 +76,7 @@ type CommandFilterEvent struct {
 	RawLine       string             `json:"raw_line"`
 }
 
-type CommandPolicy struct {
+type YusuiCommandPolicy struct {
 	ID        int64              `json:"id"`
 	Code      string             `json:"code"`
 	Name      string             `json:"name"`
@@ -85,7 +85,7 @@ type CommandPolicy struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-type NetbirdGlobalSetting struct {
+type YusuiNetbirdGlobalSetting struct {
 	ID                int16              `json:"id"`
 	ServerPeerID      string             `json:"server_peer_id"`
 	ServerPeerGroupID string             `json:"server_peer_group_id"`
@@ -94,7 +94,7 @@ type NetbirdGlobalSetting struct {
 	LastReconciledAt  pgtype.Timestamptz `json:"last_reconciled_at"`
 }
 
-type PolicyBinding struct {
+type YusuiPolicyBinding struct {
 	TicketID       int64              `json:"ticket_id"`
 	AgentID        int64              `json:"agent_id"`
 	AgentRuleID    string             `json:"agent_rule_id"`
@@ -106,7 +106,7 @@ type PolicyBinding struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
-type Project struct {
+type YusuiProject struct {
 	ID              int64              `json:"id"`
 	Code            string             `json:"code"`
 	Name            string             `json:"name"`
@@ -116,7 +116,7 @@ type Project struct {
 	CommandPolicyID *int64             `json:"command_policy_id"`
 }
 
-type Session struct {
+type YusuiSession struct {
 	ID                    int64              `json:"id"`
 	PubID                 string             `json:"pub_id"`
 	TicketID              int64              `json:"ticket_id"`
@@ -131,7 +131,7 @@ type Session struct {
 	CommandPolicySnapshot []byte             `json:"command_policy_snapshot"`
 }
 
-type SessionAttacher struct {
+type YusuiSessionAttacher struct {
 	ID         int64              `json:"id"`
 	SessionID  int64              `json:"session_id"`
 	UserID     *int64             `json:"user_id"`
@@ -142,7 +142,7 @@ type SessionAttacher struct {
 	DetachedAt pgtype.Timestamptz `json:"detached_at"`
 }
 
-type Ticket struct {
+type YusuiTicket struct {
 	ID             int64              `json:"id"`
 	PubID          string             `json:"pub_id"`
 	RequesterID    int64              `json:"requester_id"`
@@ -164,7 +164,7 @@ type Ticket struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
-type User struct {
+type YusuiUser struct {
 	ID                int64              `json:"id"`
 	Username          string             `json:"username"`
 	DisplayName       *string            `json:"display_name"`

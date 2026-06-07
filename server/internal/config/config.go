@@ -37,6 +37,10 @@ type Config struct {
 	// ServerPeerIPs is the Server's NetBird overlay IP(s) used as the ACL source
 	// in Agent rules. Empty until NetBird lands (M4). Comma-separated env.
 	ServerPeerIPs []string
+
+	// RecordingsDir is where asciinema cast files are written (v0.1 local FS;
+	// v0.2+ object storage, docs/09 §9.5).
+	RecordingsDir string
 }
 
 // Load reads configuration from environment variables.
@@ -54,6 +58,7 @@ func Load() (Config, error) {
 		AdminPassword: os.Getenv("ADMIN_PASSWORD"),
 		CredentialKey: os.Getenv("CREDENTIAL_KEY"),
 		ServerPeerIPs: splitCSV(os.Getenv("SERVER_PEER_IPS")),
+		RecordingsDir: getenv("RECORDINGS_DIR", "var/recordings"),
 	}
 	if c.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")

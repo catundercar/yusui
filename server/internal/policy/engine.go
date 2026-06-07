@@ -43,6 +43,12 @@ type Engine struct {
 	gw         agentgw.Gateway
 	logger     *slog.Logger
 	srcPeerIPs []string
+	closer     SessionCloser
+}
+
+// SessionCloser force-closes a ticket's live Web Shell sessions on revoke.
+type SessionCloser interface {
+	ForceCloseByTicket(ctx context.Context, ticketID int64, reason string) error
 }
 
 // NewEngine constructs the Policy Engine. srcPeerIPs is the Server's overlay
@@ -50,6 +56,10 @@ type Engine struct {
 func NewEngine(db *store.DB, gw agentgw.Gateway, logger *slog.Logger, srcPeerIPs []string) *Engine {
 	return &Engine{db: db, gw: gw, logger: logger, srcPeerIPs: srcPeerIPs}
 }
+
+// SetSessionCloser wires the Web Shell manager (set after construction to avoid
+// an import cycle: webshell would otherwise import policy and vice-versa).
+func (e *Engine) SetSessionCloser(c SessionCloser) { e.closer = c }
 
 // ---- reads ----
 
@@ -236,7 +246,12 @@ func (e *Engine) Revoke(ctx context.Context, ticketID int64, reason string, acto
 	if err != nil {
 		return err
 	}
-	// M2: SessionSvc.ForceCloseByTicket(ticketID) goes here (before rule revoke).
+	// Close any live Web Shell session BEFORE removing the rule (docs/05 §5.4).
+	if e.closer != nil {
+		if err := e.closer.ForceCloseByTicket(ctx, t.ID, "ticket "+reason); err != nil {
+			e.logger.Error("force-close sessions", "ticket", t.PubID, "err", err)
+		}
+	}
 	if b, err := e.db.GetBinding(ctx, t.ID); err == nil {
 		if err := e.gw.RevokeRule(ctx, b.AgentID, b.AgentRuleID); err != nil {
 			e.logger.Error("revoke rule failed", "ticket", t.PubID, "err", err)

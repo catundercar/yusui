@@ -26,6 +26,7 @@ import (
 	"github.com/catundercar/yusui/server/internal/secrets"
 	"github.com/catundercar/yusui/server/internal/services"
 	"github.com/catundercar/yusui/server/internal/store"
+	"github.com/catundercar/yusui/server/internal/webshell"
 )
 
 func main() {
@@ -103,11 +104,15 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 	engine := policy.NewEngine(db, gw, logger, cfg.ServerPeerIPs)
 	ticketH := httpapi.NewTicketHandler(engine)
 
+	shellMgr := webshell.NewManager(db, catalog, cfg.RecordingsDir, logger)
+	engine.SetSessionCloser(shellMgr)
+	webShellH := httpapi.NewWebShellHandler(shellMgr, engine, logger)
+
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Ready: db, Logger: logger, Auth: authH, Catalog: catalogH,
-			Ticket: ticketH, Manager: mgr, StepUpWindow: cfg.StepUpWindow,
+			Ticket: ticketH, WebShell: webShellH, Manager: mgr, StepUpWindow: cfg.StepUpWindow,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

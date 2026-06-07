@@ -27,6 +27,7 @@ type Deps struct {
 	Auth         *AuthHandler
 	Catalog      *CatalogHandler
 	Ticket       *TicketHandler
+	WebShell     *WebShellHandler
 	Manager      *auth.Manager
 	StepUpWindow time.Duration
 }
@@ -84,6 +85,7 @@ func NewRouter(d Deps) http.Handler {
 				r.Post("/", d.Ticket.submit) // requester submits
 				r.Get("/", d.Ticket.list)
 				r.Get("/{id}", d.Ticket.get)
+				r.Get("/{id}/terminal", d.WebShell.terminal) // WebSocket: open Web SSH
 				// Approve/reject: approver or admin, with recent step-up re-auth.
 				r.Group(func(r chi.Router) {
 					r.Use(auth.RequireRole("approver", "admin"))

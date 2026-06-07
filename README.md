@@ -23,4 +23,16 @@ curl localhost:8080/readyz           # ready
 - `make sqlc` 生成 store 查询代码
 - `make build` / `make test` / `make lint` / `make tidy`
 
-状态：**M0（地基）**。里程碑路线见 `DESIGN.md §7` 与计划文件。
+## 已实现（v0.1 MVP）
+
+| 里程碑 | 内容 | 验证 |
+|---|---|---|
+| M0 | monorepo / 13 表迁移 / chi server / compose / CI | ✅ Docker + 本地 PG |
+| M1 | 工单状态机 · Policy Engine（审计同事务）· 自动到期 · RBAC/step-up | ✅ e2e |
+| M2 | 自研 Web SSH（SSH 代理 + 命令拦截 + asciinema 录像 + 撤销 force-close） | ✅ e2e（真 sshd） |
+| M5 | Vue3 + Element Plus + xterm.js 浏览器 UI | ✅ 真浏览器 |
+| M3 | 真 Agent（nftables 网关 + gRPC 控制面，替换 mock） | ✅ e2e（容器内 nft） |
+| M4 | NetBird Adapter（REST + 幂等 + 错误分类）+ overlay runbook | ✅ 单测（mock）· ⏳ 真 NetBird 契约测试见 [deploy/NETBIRD.md](deploy/NETBIRD.md) |
+
+关键路径**端到端可用**：提工单 → 审批 → 浏览器开 Web SSH（危险命令拦截）→ 到期/撤销自动断 → 录像 + 审计可查。
+里程碑路线见 `DESIGN.md §7`。

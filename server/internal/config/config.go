@@ -46,6 +46,12 @@ type Config struct {
 	AgentGatewayMode   string // "mock" (default) | "grpc" (real Agent over gRPC)
 	AgentGRPCAddr      string // listen addr for the Agent Controller gRPC server
 	AgentRegisterToken string // shared token agents present at Register (dev)
+
+	// NetBird overlay (M4). Off by default; when on, the adapter installs the
+	// single permanent policy at startup (docs/04). Per-ticket path never calls it.
+	NetBirdEnabled bool
+	NetBirdMgmtURL string
+	NetBirdToken   string
 }
 
 // Load reads configuration from environment variables.
@@ -67,6 +73,9 @@ func Load() (Config, error) {
 		AgentGatewayMode:   getenv("AGENT_GATEWAY", "mock"),
 		AgentGRPCAddr:      getenv("AGENT_GRPC_ADDR", ":9090"),
 		AgentRegisterToken: os.Getenv("AGENT_REGISTER_TOKEN"),
+		NetBirdEnabled:     os.Getenv("NETBIRD_ENABLED") == "true",
+		NetBirdMgmtURL:     os.Getenv("NETBIRD_MGMT_URL"),
+		NetBirdToken:       os.Getenv("NETBIRD_TOKEN"),
 	}
 	if c.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("config: DATABASE_URL is required")

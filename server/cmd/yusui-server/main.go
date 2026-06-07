@@ -25,6 +25,7 @@ import (
 	"github.com/catundercar/yusui/server/internal/config"
 	"github.com/catundercar/yusui/server/internal/httpapi"
 	"github.com/catundercar/yusui/server/internal/migrate"
+	"github.com/catundercar/yusui/server/internal/netbird"
 	"github.com/catundercar/yusui/server/internal/policy"
 	"github.com/catundercar/yusui/server/internal/secrets"
 	"github.com/catundercar/yusui/server/internal/services"
@@ -144,6 +145,8 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	installNetBird(ctx, cfg, logger)
+
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -218,6 +221,34 @@ func newSealer(cfg config.Config, logger *slog.Logger) (*secrets.Sealer, error) 
 		return nil, err
 	}
 	return secrets.NewSealer(key, "local-v1")
+}
+
+// installNetBird ensures the single permanent NetBird policy at startup
+// (docs/04). Best-effort: failure degrades (blocks new project/agent onboarding)
+// but does not stop the server (docs/01 §1.3). No-op unless NETBIRD_ENABLED.
+func installNetBird(ctx context.Context, cfg config.Config, logger *slog.Logger) {
+	if !cfg.NetBirdEnabled {
+		return
+	}
+	if cfg.NetBirdMgmtURL == "" || cfg.NetBirdToken == "" {
+		logger.Warn("NETBIRD_ENABLED but NETBIRD_MGMT_URL/NETBIRD_TOKEN missing; skipping")
+		return
+	}
+	nb := netbird.New(cfg.NetBirdMgmtURL, cfg.NetBirdToken, logger)
+	gid, err := nb.EnsureGroup(ctx, "yusui:server-peers")
+	if err != nil {
+		logger.Error("netbird: ensure server group", "class", netbird.ClassOf(err), "err", err)
+		return
+	}
+	// dst is all project agent groups; populated as projects are created
+	// (per-project hook, docs/04 §4.4). At first boot the server group is a
+	// placeholder so the policy exists.
+	pid, err := nb.EnsureBuiltinPolicy(ctx, "yusui:builtin:server-to-agents", gid, []string{gid})
+	if err != nil {
+		logger.Error("netbird: ensure builtin policy", "class", netbird.ClassOf(err), "err", err)
+		return
+	}
+	logger.Info("netbird permanent policy ensured", "server_group", gid, "policy", pid)
 }
 
 func newLogger(level string) *slog.Logger {

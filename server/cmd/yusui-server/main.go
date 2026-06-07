@@ -17,10 +17,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/catundercar/yusui/server/internal/agentgw"
 	"github.com/catundercar/yusui/server/internal/auth"
 	"github.com/catundercar/yusui/server/internal/config"
 	"github.com/catundercar/yusui/server/internal/httpapi"
 	"github.com/catundercar/yusui/server/internal/migrate"
+	"github.com/catundercar/yusui/server/internal/policy"
 	"github.com/catundercar/yusui/server/internal/secrets"
 	"github.com/catundercar/yusui/server/internal/services"
 	"github.com/catundercar/yusui/server/internal/store"
@@ -97,16 +99,23 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 	catalog := services.NewCatalog(db.Queries, sealer)
 	catalogH := httpapi.NewCatalogHandler(catalog, logger)
 
+	gw := agentgw.NewMemory(logger)
+	engine := policy.NewEngine(db, gw, logger, cfg.ServerPeerIPs)
+	ticketH := httpapi.NewTicketHandler(engine)
+
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
-			Ready: db, Logger: logger, Auth: authH, Catalog: catalogH, Manager: mgr,
+			Ready: db, Logger: logger, Auth: authH, Catalog: catalogH,
+			Ticket: ticketH, Manager: mgr, StepUpWindow: cfg.StepUpWindow,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	go engine.RunScheduler(ctx, 5*time.Second)
 
 	errc := make(chan error, 1)
 	go func() {

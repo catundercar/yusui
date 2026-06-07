@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/netip"
 
+	"github.com/catundercar/yusui/server/internal/auth"
 	"github.com/catundercar/yusui/server/internal/secrets"
 	"github.com/catundercar/yusui/server/internal/store"
 )
@@ -153,6 +154,36 @@ func (c *Catalog) OpenCredentialSecret(ctx context.Context, assetID int64) (sshU
 		return "", "", "", err
 	}
 	return cred.SshUser, string(pt), cred.AuthKind, nil
+}
+
+// ---- users (admin-managed) ----
+
+// CreateUser hashes the password (policy-checked) and creates a local account.
+func (c *Catalog) CreateUser(ctx context.Context, username string, displayName, email *string, role, password string) (store.YusuiUser, error) {
+	if username == "" {
+		return store.YusuiUser{}, invalid("username is required")
+	}
+	switch role {
+	case "requester", "approver", "admin":
+	default:
+		return store.YusuiUser{}, invalid("role must be requester|approver|admin")
+	}
+	if err := auth.CheckPolicy(password); err != nil {
+		return store.YusuiUser{}, invalid("%s", err.Error())
+	}
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		return store.YusuiUser{}, err
+	}
+	return c.q.CreateUser(ctx, store.CreateUserParams{
+		Username: username, DisplayName: displayName, Email: email,
+		Role: role, PasswordHash: &hash, MfaEnabled: false,
+	})
+}
+
+// ListUsers returns all users without secrets.
+func (c *Catalog) ListUsers(ctx context.Context) ([]store.ListUsersRow, error) {
+	return c.q.ListUsers(ctx)
 }
 
 // IsValidation reports whether err is a caller-input validation error.

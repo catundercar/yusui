@@ -132,6 +132,54 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (Yusui
 	return i, err
 }
 
+const listUsers = `-- name: ListUsers :many
+SELECT id, username, display_name, email, role, mfa_enabled, is_active, last_login_at, created_at
+FROM yusui.users ORDER BY id
+`
+
+type ListUsersRow struct {
+	ID          int64              `json:"id"`
+	Username    string             `json:"username"`
+	DisplayName *string            `json:"display_name"`
+	Email       *string            `json:"email"`
+	Role        string             `json:"role"`
+	MfaEnabled  bool               `json:"mfa_enabled"`
+	IsActive    bool               `json:"is_active"`
+	LastLoginAt pgtype.Timestamptz `json:"last_login_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+// Excludes password_hash / mfa_secret_enc — never list secrets.
+func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
+	rows, err := q.db.Query(ctx, listUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsersRow
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.DisplayName,
+			&i.Email,
+			&i.Role,
+			&i.MfaEnabled,
+			&i.IsActive,
+			&i.LastLoginAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markLoginFailure = `-- name: MarkLoginFailure :one
 UPDATE yusui.users
 SET failed_login_count = failed_login_count + 1,

@@ -198,3 +198,34 @@ func (h *CatalogHandler) listCredentials(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, cs)
 }
+
+// ---- users ----
+
+func (h *CatalogHandler) createUser(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username    string  `json:"username"`
+		DisplayName *string `json:"display_name"`
+		Email       *string `json:"email"`
+		Role        string  `json:"role"`
+		Password    string  `json:"password"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	u, err := h.cat.CreateUser(r.Context(), req.Username, req.DisplayName, req.Email, req.Role, req.Password)
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, toPublicUser(u)) // never echo the hash
+}
+
+func (h *CatalogHandler) listUsers(w http.ResponseWriter, r *http.Request) {
+	us, err := h.cat.ListUsers(r.Context())
+	if err != nil {
+		h.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, us)
+}

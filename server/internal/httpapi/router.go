@@ -22,11 +22,13 @@ type Readiness interface {
 
 // Deps are the collaborators the router wires together.
 type Deps struct {
-	Ready   Readiness
-	Logger  *slog.Logger
-	Auth    *AuthHandler
-	Catalog *CatalogHandler
-	Manager *auth.Manager
+	Ready        Readiness
+	Logger       *slog.Logger
+	Auth         *AuthHandler
+	Catalog      *CatalogHandler
+	Ticket       *TicketHandler
+	Manager      *auth.Manager
+	StepUpWindow time.Duration
 }
 
 // NewRouter builds the HTTP handler.
@@ -72,6 +74,25 @@ func NewRouter(d Deps) http.Handler {
 					r.Post("/{id}/credentials", d.Catalog.createCredential)
 					r.Get("/{id}/credentials", d.Catalog.listCredentials)
 				})
+				r.Route("/users", func(r chi.Router) {
+					r.Post("/", d.Catalog.createUser)
+					r.Get("/", d.Catalog.listUsers)
+				})
+			})
+
+			r.Route("/tickets", func(r chi.Router) {
+				r.Post("/", d.Ticket.submit) // requester submits
+				r.Get("/", d.Ticket.list)
+				r.Get("/{id}", d.Ticket.get)
+				// Approve/reject: approver or admin, with recent step-up re-auth.
+				r.Group(func(r chi.Router) {
+					r.Use(auth.RequireRole("approver", "admin"))
+					r.Use(auth.RequireStepUp(d.StepUpWindow))
+					r.Post("/{id}/approve", d.Ticket.approve)
+					r.Post("/{id}/reject", d.Ticket.reject)
+				})
+				// Revoke: admin or the owning requester (checked in handler), step-up required.
+				r.With(auth.RequireStepUp(d.StepUpWindow)).Post("/{id}/revoke", d.Ticket.revoke)
 			})
 		})
 	})

@@ -12,6 +12,11 @@ SELECT * FROM yusui.users WHERE id = $1;
 -- name: CountUsers :one
 SELECT count(*) FROM yusui.users;
 
+-- name: ListUsers :many
+-- Excludes password_hash / mfa_secret_enc — never list secrets.
+SELECT id, username, display_name, email, role, mfa_enabled, is_active, last_login_at, created_at
+FROM yusui.users ORDER BY id;
+
 -- name: MarkLoginSuccess :exec
 UPDATE yusui.users
 SET last_login_at = now(), failed_login_count = 0, locked_until = NULL, updated_at = now()

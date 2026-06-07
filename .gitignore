@@ -1,0 +1,19 @@
+# build output
+/out/
+bin/
+*.exe
+*.test
+
+# local env / secrets
+.env
+deploy/.env
+
+# frontend (M2+)
+web/node_modules/
+web/dist/
+
+# editor / os
+.DS_Store
+*.swp
+.idea/
+.vscode/

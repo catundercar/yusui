@@ -1,0 +1,52 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: yusui
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l server agent)
+          if [ -n "$unformatted" ]; then echo "needs gofmt:"; echo "$unformatted"; exit 1; fi
+      - name: build
+        run: go build github.com/catundercar/yusui/server/... github.com/catundercar/yusui/agent/...
+      - name: test
+        run: |
+          (cd server && go test ./...)
+          (cd agent && go test ./...)
+      - name: migration smoke
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: yusui
+        run: |
+          psql -v ON_ERROR_STOP=1 \
+            -c "CREATE ROLE yusui_app LOGIN PASSWORD 'appsecret';" \
+            -c "CREATE ROLE yusui_migrate LOGIN PASSWORD 'migratesecret';" \
+            -c "GRANT CREATE, CONNECT ON DATABASE yusui TO yusui_migrate;" \
+            -c "GRANT CONNECT ON DATABASE yusui TO yusui_app;"
+          cd server
+          DATABASE_URL="postgres://postgres:postgres@localhost:5432/yusui?sslmode=disable" \
+            go run ./cmd/yusui-server migrate

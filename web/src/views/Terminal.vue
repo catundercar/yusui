@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from "vue"
 import { useRoute, useRouter } from "vue-router"
+import { useI18n } from "vue-i18n"
 import { ElMessageBox, ElNotification } from "element-plus"
 import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
@@ -9,7 +10,9 @@ import { session } from "../auth"
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const termEl = ref<HTMLDivElement>()
+const connState = ref<"connecting" | "connected" | "closed">("connecting")
 let term: Terminal
 let fit: FitAddon
 let ws: WebSocket
@@ -19,7 +22,12 @@ const b64encode = (s: string) => btoa(String.fromCharCode(...new TextEncoder().e
 const b64decode = (b: string) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0))
 
 onMounted(() => {
-  term = new Terminal({ cursorBlink: true, fontSize: 13, fontFamily: "Menlo, monospace", theme: { background: "#1e1e1e" } })
+  term = new Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    fontFamily: '"Geist Mono Variable", ui-monospace, Menlo, monospace',
+    theme: { background: "#0e1016", foreground: "#d6dae2", cursor: "#8b85f5", selectionBackground: "#2b2f55" },
+  })
   fit = new FitAddon()
   term.loadAddon(fit)
   term.open(termEl.value!)
@@ -36,29 +44,34 @@ onMounted(() => {
         term.write(b64decode(m.data))
         break
       case "state":
-        term.writeln(`\x1b[90m[已连接 session ${m.session}]\x1b[0m`)
+        connState.value = "connected"
+        term.writeln(`\x1b[90m${t("terminal.connected", { id: m.session })}\x1b[0m`)
         break
       case "filter_block":
-        term.writeln(`\r\n\x1b[31m[已拦截] ${m.msg || m.rule}: ${m.line}\x1b[0m`)
-        ElNotification.error({ title: "危险命令已拦截", message: m.line })
+        term.writeln(`\r\n\x1b[31m${t("terminal.blocked")} ${m.msg || m.rule}: ${m.line}\x1b[0m`)
+        ElNotification.error({ title: t("terminal.blockTitle"), message: m.line })
         break
       case "filter_warn":
-        ElNotification.warning({ title: "警告", message: m.line })
+        ElNotification.warning({ title: t("terminal.warnTitle"), message: m.line })
         break
       case "filter_confirm":
-        ElMessageBox.confirm(`${m.msg || m.rule}\n\n${m.line}`, "确认执行此命令?", { type: "warning", confirmButtonText: "确认执行", cancelButtonText: "取消" })
+        ElMessageBox.confirm(`${m.msg || m.rule}\n\n${m.line}`, t("terminal.confirmTitle"), { type: "warning", confirmButtonText: t("terminal.confirmOk"), cancelButtonText: t("terminal.confirmCancel") })
           .then(() => ws.send(JSON.stringify({ t: "confirm_token", token: m.token })))
           .catch(() => { /* let it time out / clear */ })
         break
       case "closed":
-        term.writeln(`\r\n\x1b[33m[会话已关闭: ${m.reason}]\x1b[0m`)
+        connState.value = "closed"
+        term.writeln(`\r\n\x1b[33m${t("terminal.closed", { reason: m.reason })}\x1b[0m`)
         break
       case "error":
-        term.writeln(`\r\n\x1b[31m[错误] ${m.msg}\x1b[0m`)
+        term.writeln(`\r\n\x1b[31m${t("terminal.error")} ${m.msg}\x1b[0m`)
         break
     }
   }
-  ws.onclose = () => term.writeln("\r\n\x1b[90m[连接断开]\x1b[0m")
+  ws.onclose = () => {
+    if (connState.value !== "closed") connState.value = "closed"
+    term.writeln(`\r\n\x1b[90m${t("terminal.disconnected")}\x1b[0m`)
+  }
 
   term.onData((d) => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ t: "stdin", data: b64encode(d) }))
@@ -79,11 +92,70 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div style="height: 100%; display: flex; flex-direction: column; background: #1e1e1e">
-    <div style="padding: 6px 12px; color: #ccc; background: #2d2d2d; display: flex; justify-content: space-between; align-items: center">
-      <span>工单 #{{ route.params.id }} · Web SSH（命令过滤生效中）</span>
-      <el-button size="small" @click="router.push('/tickets')">返回工单</el-button>
+  <div class="term">
+    <div class="term-bar">
+      <div class="term-id">
+        <span class="term-dot" :class="connState" />
+        <span>{{ t("terminal.header", { id: route.params.id }) }}</span>
+      </div>
+      <el-button size="small" @click="router.push('/tickets')">{{ t("terminal.back") }}</el-button>
     </div>
-    <div ref="termEl" style="flex: 1; padding: 6px; overflow: hidden"></div>
+    <div ref="termEl" class="term-screen" />
   </div>
 </template>
+
+<style scoped>
+.term {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--ys-term-bg);
+}
+.term-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--ys-term-bar);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  color: rgba(255, 255, 255, 0.82);
+}
+.term-id {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-family: var(--ys-font-mono);
+}
+.term-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #d9a441;
+  flex: none;
+}
+.term-dot.connected {
+  background: #2ecc71;
+  box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.55);
+  animation: term-pulse 2s var(--ys-ease) infinite;
+}
+.term-dot.closed {
+  background: #e05656;
+  animation: none;
+}
+@keyframes term-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.5); }
+  70% { box-shadow: 0 0 0 6px rgba(46, 204, 113, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(46, 204, 113, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .term-dot.connected { animation: none; }
+}
+.term-screen {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 10px;
+  overflow: hidden;
+}
+</style>

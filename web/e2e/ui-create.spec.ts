@@ -72,7 +72,8 @@ test("create the entire catalog + a ticket through the UI (no API seeding)", asy
   await pane.getByPlaceholder("username").fill(NEWUSER.username)
   await pane.getByPlaceholder("密码 (≥12, 3 类字符)").fill(NEWUSER.password)
   await pane.getByRole("button", { name: "添加用户" }).click()
-  await expect(pane.getByRole("row").filter({ hasText: NEWUSER.username })).toContainText("requester")
+  // role label is i18n'd; assert the stable enum via data-role
+  await expect(pane.getByRole("row").filter({ hasText: NEWUSER.username }).locator('[data-role="requester"]')).toBeVisible()
 
   // --- ticket via the 提单 dialog (project→asset cascade) ---
   await page.goto("/tickets")
@@ -83,5 +84,5 @@ test("create the entire catalog + a ticket through the UI (no API seeding)", asy
   await dialog.getByPlaceholder("22,3306").fill("22") // ...clicking the port field closes it
   await dialog.getByPlaceholder("访问原因").fill("ui created ticket")
   await dialog.getByRole("button", { name: "提交" }).click()
-  await expect(page.getByRole("row").filter({ hasText: "ui created ticket" })).toContainText("pending")
+  await expect(page.getByRole("row").filter({ hasText: "ui created ticket" }).locator('[data-status="pending"]')).toBeVisible()
 })

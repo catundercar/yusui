@@ -54,13 +54,13 @@ func (h *AuthHandler) login(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		switch {
 		case errors.Is(err, auth.ErrAccountLocked):
-			writeErr(w, http.StatusLocked, "account locked, try again later")
+			writeErrCode(w, http.StatusLocked, "account_locked", "account locked, try again later")
 		case errors.Is(err, auth.ErrInactive):
-			writeErr(w, http.StatusForbidden, "account inactive")
+			writeErrCode(w, http.StatusForbidden, "account_inactive", "account inactive")
 		case errors.Is(err, auth.ErrMFAUnsupported):
-			writeErr(w, http.StatusNotImplemented, "MFA not yet supported")
+			writeErrCode(w, http.StatusNotImplemented, "mfa_unsupported", "MFA not yet supported")
 		default:
-			writeErr(w, http.StatusUnauthorized, "invalid credentials")
+			writeErrCode(w, http.StatusUnauthorized, "invalid_credentials", "invalid credentials")
 		}
 		return
 	}
@@ -90,17 +90,17 @@ func (h *AuthHandler) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, err := h.mgr.Parse(req.RefreshToken)
 	if err != nil || claims.Kind != auth.RefreshToken {
-		writeErr(w, http.StatusUnauthorized, "invalid refresh token")
+		writeErrCode(w, http.StatusUnauthorized, "invalid_refresh", "invalid refresh token")
 		return
 	}
 	uid, err := strconv.ParseInt(claims.Subject, 10, 64)
 	if err != nil {
-		writeErr(w, http.StatusUnauthorized, "invalid refresh token")
+		writeErrCode(w, http.StatusUnauthorized, "invalid_refresh", "invalid refresh token")
 		return
 	}
 	u, err := h.q.GetUserByID(r.Context(), uid)
 	if err != nil || !u.IsActive {
-		writeErr(w, http.StatusUnauthorized, "invalid refresh token")
+		writeErrCode(w, http.StatusUnauthorized, "invalid_refresh", "invalid refresh token")
 		return
 	}
 	// Refresh yields an access token WITHOUT step-up; sensitive actions re-step-up.
@@ -116,7 +116,7 @@ func (h *AuthHandler) me(w http.ResponseWriter, r *http.Request) {
 	p, _ := auth.PrincipalFrom(r.Context())
 	u, err := h.q.GetUserByID(r.Context(), p.UserID)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "user not found")
+		writeErrCode(w, http.StatusNotFound, "user_not_found", "user not found")
 		return
 	}
 	writeJSON(w, http.StatusOK, toPublicUser(u))
@@ -133,7 +133,7 @@ func (h *AuthHandler) stepup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.idp.StepUp(r.Context(), p.UserID, req.Password, req.MfaCode); err != nil {
-		writeErr(w, http.StatusUnauthorized, "step-up re-auth failed")
+		writeErrCode(w, http.StatusUnauthorized, "stepup_failed", "step-up re-auth failed")
 		return
 	}
 	access, err := h.mgr.IssueAccess(p.UserID, p.Username, p.Role, time.Now().Unix())

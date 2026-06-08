@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from "vue"
 import { useRouter } from "vue-router"
 import { useI18n } from "vue-i18n"
 import { ElMessage, ElMessageBox } from "element-plus"
-import { api, withStepUp } from "../api"
+import { api, withStepUp, errText } from "../api"
 import { session } from "../auth"
 
 const router = useRouter()
@@ -36,7 +36,7 @@ async function load() {
     projects.value = (await api.listProjects()) || []
     assets.value = (await api.listAssets()) || []
   } catch (e: any) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   } finally {
     loading.value = false
   }
@@ -57,7 +57,7 @@ async function submit() {
     dialog.value = false
     await load()
   } catch (e: any) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   }
 }
 
@@ -73,7 +73,7 @@ async function doApprove(id: number) {
     ElMessage.success(t("tickets.approvedOk"))
     await load()
   } catch (e: any) {
-    if (e !== "cancel") ElMessage.error(e.message || t("tickets.approveFail"))
+    if (e !== "cancel") ElMessage.error(errText(e))
   }
 }
 async function doReject(id: number) {
@@ -89,7 +89,7 @@ async function doRevoke(id: number) {
     ElMessage.success(t("tickets.revokedOk"))
     await load()
   } catch (e: any) {
-    if (e !== "cancel") ElMessage.error(e.message || t("tickets.revokeFail"))
+    if (e !== "cancel") ElMessage.error(errText(e))
   }
 }
 </script>

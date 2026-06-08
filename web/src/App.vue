@@ -4,8 +4,10 @@ import { useRouter, useRoute } from "vue-router"
 import { useI18n } from "vue-i18n"
 import zhCn from "element-plus/es/locale/lang/zh-cn"
 import enLocale from "element-plus/es/locale/lang/en"
+import { Moon, Sunny } from "@element-plus/icons-vue"
 import { session, logout } from "./auth"
 import { setLang, type Lang } from "./i18n"
+import { theme, toggleTheme } from "./theme"
 
 const router = useRouter()
 const route = useRoute()
@@ -41,6 +43,12 @@ function switchLang(l: Lang) {
         </el-menu>
 
         <div class="ys-actions">
+          <button class="ys-theme" :aria-label="theme === 'dark' ? 'light' : 'dark'" @click="toggleTheme">
+            <el-icon :size="17">
+              <Moon v-if="theme === 'light'" />
+              <Sunny v-else />
+            </el-icon>
+          </button>
           <div class="ys-lang" role="group" :aria-label="t('app.language')">
             <button :class="{ on: locale === 'zh' }" @click="switchLang('zh')">中</button>
             <button :class="{ on: locale === 'en' }" @click="switchLang('en')">EN</button>
@@ -122,6 +130,24 @@ function switchLang(l: Lang) {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+/* theme toggle */
+.ys-theme {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--ys-border);
+  border-radius: var(--ys-radius);
+  background: var(--ys-canvas);
+  color: var(--ys-muted);
+  cursor: pointer;
+  transition: color 0.12s var(--ys-ease), border-color 0.12s var(--ys-ease);
+}
+.ys-theme:hover {
+  color: var(--ys-accent);
+  border-color: var(--ys-border-strong);
 }
 
 /* language segmented control */

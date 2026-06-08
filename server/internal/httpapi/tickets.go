@@ -19,14 +19,16 @@ func NewTicketHandler(engine *policy.Engine) *TicketHandler { return &TicketHand
 
 func (h *TicketHandler) fail(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, policy.ErrSelfApprove): // must precede ErrForbidden (it wraps it)
+		writeErrCode(w, http.StatusForbidden, "approver_eq_requester", err.Error())
 	case errors.Is(err, policy.ErrValidation):
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeErrCode(w, http.StatusBadRequest, "validation", err.Error())
 	case errors.Is(err, policy.ErrNotFound):
-		writeErr(w, http.StatusNotFound, "ticket not found")
+		writeErrCode(w, http.StatusNotFound, "ticket_not_found", "ticket not found")
 	case errors.Is(err, policy.ErrConflict):
-		writeErr(w, http.StatusConflict, err.Error())
+		writeErrCode(w, http.StatusConflict, "ticket_conflict", err.Error())
 	case errors.Is(err, policy.ErrForbidden):
-		writeErr(w, http.StatusForbidden, err.Error())
+		writeErrCode(w, http.StatusForbidden, "forbidden", err.Error())
 	default:
 		writeErr(w, http.StatusInternalServerError, "internal error")
 	}
@@ -88,11 +90,11 @@ func (h *TicketHandler) get(w http.ResponseWriter, r *http.Request) {
 	}
 	t, err := h.engine.Get(r.Context(), id)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "ticket not found")
+		writeErrCode(w, http.StatusNotFound, "ticket_not_found", "ticket not found")
 		return
 	}
 	if p.Role == "requester" && t.RequesterID != p.UserID {
-		writeErr(w, http.StatusForbidden, "not your ticket")
+		writeErrCode(w, http.StatusForbidden, "forbidden_not_owner", "not your ticket")
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
@@ -142,11 +144,11 @@ func (h *TicketHandler) revoke(w http.ResponseWriter, r *http.Request) {
 	// Admin may revoke any ticket; a requester may revoke only their own.
 	t, err := h.engine.Get(r.Context(), id)
 	if err != nil {
-		writeErr(w, http.StatusNotFound, "ticket not found")
+		writeErrCode(w, http.StatusNotFound, "ticket_not_found", "ticket not found")
 		return
 	}
 	if p.Role != "admin" && t.RequesterID != p.UserID {
-		writeErr(w, http.StatusForbidden, "not allowed to revoke this ticket")
+		writeErrCode(w, http.StatusForbidden, "forbidden_not_owner", "not allowed to revoke this ticket")
 		return
 	}
 	var req struct {

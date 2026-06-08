@@ -26,6 +26,10 @@ var (
 	ErrConflict   = errors.New("ticket not in expected state")
 	ErrForbidden  = errors.New("forbidden")
 	ErrValidation = errors.New("validation")
+	// ErrSelfApprove is a specific forbidden case (invariant #8: approver ≠
+	// requester). It wraps ErrForbidden so generic handling still maps it to 403,
+	// while the handler can detect it for a precise client error code.
+	ErrSelfApprove = fmt.Errorf("%w: approver must differ from requester", ErrForbidden)
 )
 
 // Actor identifies the trigger of a transition, for audit.
@@ -142,7 +146,7 @@ func (e *Engine) Approve(ctx context.Context, ticketID, approverID int64, actor 
 	_, err := e.transition(ctx, ticketID, "pending", "ticket.approve", actor, nil,
 		func(ctx context.Context, q *store.Queries, t store.YusuiTicket) error {
 			if t.RequesterID == approverID {
-				return fmt.Errorf("%w: approver must differ from requester", ErrForbidden)
+				return ErrSelfApprove
 			}
 			assetIDs, err := parseAssetIDs(t.TargetSelector)
 			if err != nil {
@@ -177,7 +181,7 @@ func (e *Engine) Reject(ctx context.Context, ticketID, approverID int64, reason 
 	return e.transition(ctx, ticketID, "pending", "ticket.reject", actor, map[string]any{"reason": reason},
 		func(ctx context.Context, q *store.Queries, t store.YusuiTicket) error {
 			if t.RequesterID == approverID {
-				return fmt.Errorf("%w: approver must differ from requester", ErrForbidden)
+				return ErrSelfApprove
 			}
 			return q.CloseTicket(ctx, store.CloseTicketParams{ID: t.ID, Status: "rejected"})
 		})

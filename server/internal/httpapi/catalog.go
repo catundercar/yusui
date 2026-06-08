@@ -26,9 +26,9 @@ func (h *CatalogHandler) fail(w http.ResponseWriter, err error) {
 	var pg *pgconn.PgError
 	switch {
 	case services.IsValidation(err):
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeErrCode(w, http.StatusBadRequest, "validation", err.Error())
 	case errors.As(err, &pg) && pg.Code == "23505":
-		writeErr(w, http.StatusConflict, "resource already exists")
+		writeErrCode(w, http.StatusConflict, "already_exists", "resource already exists")
 	default:
 		h.logger.Error("catalog handler error", "err", err)
 		writeErr(w, http.StatusInternalServerError, "internal error")

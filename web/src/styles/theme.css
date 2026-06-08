@@ -1,0 +1,315 @@
+/*
+ * YuSui control-plane theme.
+ *
+ * Single CSS strategy: override Element Plus design tokens (CSS custom
+ * properties) here, add a small --ys-* token set, and refine a few EP
+ * components globally. Components keep only layout in scoped <style>.
+ *
+ * Direction: light control plane. Near-white cool canvas, hairline-bordered
+ * white surfaces, one indigo accent, Geist Sans for UI + Geist Mono for every
+ * machine value (IDs, IPs, ports, timestamps, terminal). Dense, calm, no
+ * decoration. See web/DESIGN.md.
+ */
+
+:root {
+  /* ---- brand accent: indigo ramp (Element Plus reads the full ramp) ---- */
+  --el-color-primary: #4f46e5;
+  --el-color-primary-dark-2: #3f38b7;
+  --el-color-primary-light-3: #7b73ea;
+  --el-color-primary-light-5: #a7a2f1;
+  --el-color-primary-light-7: #d3d1f8;
+  --el-color-primary-light-8: #e4e2fb;
+  --el-color-primary-light-9: #f1f0fd;
+
+  /* ---- semantic colors, retuned crisp (main + soft bg + hover + dark) ---- */
+  --el-color-success: #16a34a;
+  --el-color-success-light-3: #5cbd83;
+  --el-color-success-light-8: #d6f0e1;
+  --el-color-success-light-9: #e9f7ef;
+  --el-color-success-dark-2: #12833b;
+  --el-color-warning: #d97706;
+  --el-color-warning-light-3: #e6a44d;
+  --el-color-warning-light-8: #fbe7cd;
+  --el-color-warning-light-9: #fdf3e7;
+  --el-color-warning-dark-2: #ae5f05;
+  --el-color-danger: #dc2626;
+  --el-color-danger-light-3: #e86b6b;
+  --el-color-danger-light-8: #f8d5d5;
+  --el-color-danger-light-9: #fcebeb;
+  --el-color-danger-dark-2: #b01e1e;
+  --el-color-error: #dc2626;
+  --el-color-error-light-9: #fcebeb;
+  --el-color-info: #64748b;
+  --el-color-info-light-3: #93a0b1;
+  --el-color-info-light-8: #dfe3e9;
+  --el-color-info-light-9: #eef0f3;
+  --el-color-info-dark-2: #50596f;
+
+  /* ---- text ---- */
+  --el-text-color-primary: #1e2430;
+  --el-text-color-regular: #3a4150;
+  --el-text-color-secondary: #6b7382;
+  --el-text-color-placeholder: #aab1bd;
+  --el-text-color-disabled: #c4cad3;
+
+  /* ---- borders (hairlines, cool gray tinted toward indigo) ---- */
+  --el-border-color: #e2e6ec;
+  --el-border-color-light: #e8ebf0;
+  --el-border-color-lighter: #eef1f5;
+  --el-border-color-extra-light: #f4f6f9;
+  --el-border-color-dark: #d3d8e0;
+  --el-border-color-hover: #c2c8d2;
+
+  /* ---- surfaces / fills ---- */
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #f6f7f9;
+  --el-bg-color-overlay: #ffffff;
+  --el-fill-color-blank: #ffffff;
+  --el-fill-color: #f3f5f8;
+  --el-fill-color-light: #f6f7f9;
+  --el-fill-color-lighter: #fafbfc;
+  --el-fill-color-dark: #eaedf2;
+
+  /* ---- radius ---- */
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 10px;
+
+  /* ---- type ---- */
+  --el-font-family: "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --el-font-size-base: 14px;
+
+  /* ---- shadows (depth via layered shadow, not heavy borders) ---- */
+  --el-box-shadow: 0 1px 2px rgba(20, 30, 50, 0.06), 0 4px 16px rgba(20, 30, 50, 0.08);
+  --el-box-shadow-light: 0 1px 2px rgba(20, 30, 50, 0.05), 0 1px 3px rgba(20, 30, 50, 0.08);
+
+  /* ---- YuSui tokens ---- */
+  --ys-canvas: #f6f7f9;
+  --ys-surface: #ffffff;
+  --ys-accent: #4f46e5;
+  --ys-accent-soft: #f1f0fd;
+  --ys-text: #1e2430;
+  --ys-muted: #6b7382;
+  --ys-border: #e2e6ec;
+  --ys-border-strong: #d3d8e0;
+  --ys-radius-sm: 4px;
+  --ys-radius: 6px;
+  --ys-radius-lg: 10px;
+  --ys-shadow-sm: 0 1px 2px rgba(20, 30, 50, 0.06);
+  --ys-shadow-card: 0 1px 2px rgba(20, 30, 50, 0.05), 0 1px 3px rgba(20, 30, 50, 0.07);
+  --ys-font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ys-ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* terminal (dark island inside the light app) */
+  --ys-term-bg: #0e1016;
+  --ys-term-bar: #171a22;
+}
+
+/* ---------------------------------------------------------------- base ---- */
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+body {
+  background: var(--ys-canvas);
+  color: var(--ys-text);
+  font-family: var(--el-font-family);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--ys-accent-soft);
+  color: var(--ys-accent);
+}
+
+/* visible, accessible focus */
+:focus-visible {
+  outline: 2px solid var(--ys-accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* slim, quiet scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cfd4dc transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cfd4dc;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #b6bcc7;
+  background-clip: padding-box;
+}
+
+/* ------------------------------------------------------------ utilities ---- */
+.ys-mono {
+  font-family: var(--ys-font-mono);
+  font-feature-settings: "ss01";
+}
+.ys-tabular {
+  font-variant-numeric: tabular-nums;
+}
+.ys-muted {
+  color: var(--ys-muted);
+}
+
+/* a colored status dot, color set via currentColor on the wrapper */
+.ys-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  margin-right: 7px;
+  vertical-align: middle;
+  flex: none;
+}
+
+/* ------------------------------------------------------------- motion ---- */
+.ys-view-enter-active {
+  transition: opacity 0.22s var(--ys-ease), transform 0.22s var(--ys-ease);
+}
+.ys-view-enter-from {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ------------------------------------------------ Element Plus refinements ---- */
+
+/* buttons: medium weight, press feedback, no jumpy transitions */
+.el-button {
+  font-weight: 500;
+  transition: background-color 0.12s var(--ys-ease), border-color 0.12s var(--ys-ease),
+    color 0.12s var(--ys-ease), transform 0.08s var(--ys-ease), box-shadow 0.12s var(--ys-ease);
+}
+.el-button:active {
+  transform: scale(0.97);
+}
+.el-button--primary {
+  box-shadow: 0 1px 2px rgba(79, 70, 229, 0.25);
+}
+
+/* inputs / selects: calmer borders, soft focus ring */
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  box-shadow: inset 0 0 0 1px var(--el-border-color);
+  transition: box-shadow 0.14s var(--ys-ease);
+}
+.el-input__wrapper:hover,
+.el-select__wrapper:hover {
+  box-shadow: inset 0 0 0 1px var(--el-border-color-hover);
+}
+.el-input__wrapper.is-focus,
+.el-textarea__inner:focus,
+.el-select__wrapper.is-focused {
+  box-shadow: inset 0 0 0 1px var(--ys-accent), 0 0 0 3px rgba(79, 70, 229, 0.12);
+}
+
+/* cards / popovers as lifted surfaces */
+.el-card {
+  border: 1px solid var(--ys-border);
+  border-radius: var(--ys-radius-lg);
+  box-shadow: var(--ys-shadow-card);
+}
+.el-card__body {
+  padding: 20px;
+}
+.el-popper {
+  border-radius: var(--ys-radius) !important;
+}
+
+/* tables: quiet header, hairline rows, mono-friendly */
+.el-table {
+  --el-table-border-color: var(--el-border-color-lighter);
+  --el-table-header-bg-color: #fafbfc;
+  --el-table-row-hover-bg-color: #f6f7fb;
+  font-size: 13px;
+}
+.el-table th.el-table__cell {
+  font-weight: 600;
+  color: var(--ys-muted);
+  letter-spacing: 0.02em;
+  background: var(--el-table-header-bg-color);
+}
+.el-table .cell {
+  line-height: 1.55;
+}
+
+/* tags: pill, soft */
+.el-tag {
+  border-radius: 999px;
+  font-weight: 500;
+  border: none;
+  padding: 0 10px;
+}
+
+/* horizontal menu (top nav): understated, indigo active text */
+.el-menu--horizontal {
+  --el-menu-hover-bg-color: transparent;
+}
+.el-menu--horizontal > .el-menu-item {
+  border-bottom: 2px solid transparent;
+  font-weight: 500;
+  color: var(--ys-muted);
+}
+.el-menu--horizontal > .el-menu-item.is-active {
+  color: var(--ys-accent);
+  border-bottom-color: var(--ys-accent);
+}
+.el-menu--horizontal > .el-menu-item:hover {
+  color: var(--ys-text);
+}
+
+/* tabs: tighter, indigo bar */
+.el-tabs__item {
+  font-weight: 500;
+}
+.el-tabs__active-bar {
+  background-color: var(--ys-accent);
+}
+
+/* dialogs */
+.el-dialog {
+  border-radius: var(--ys-radius-lg);
+  box-shadow: var(--el-box-shadow);
+}
+.el-dialog__title {
+  font-weight: 600;
+}
+
+/* toasts / notifications */
+.el-message,
+.el-notification {
+  border-radius: var(--ys-radius);
+}
+.el-alert {
+  border-radius: var(--ys-radius);
+}

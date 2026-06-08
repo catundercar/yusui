@@ -19,7 +19,7 @@ test("submit→approve→Web SSH: rm -rf / is blocked, whoami runs", async ({ pa
 
   // Open the terminal for the seeded active ticket.
   const row = page.getByRole("row").filter({ hasText: TICKET_REASON })
-  await expect(row).toContainText("active")
+  await expect(row.locator('[data-status="active"]')).toBeVisible() // status label is i18n'd; assert the stable enum
   await row.getByRole("button", { name: "打开终端" }).click()
   await expect(page).toHaveURL(/\/tickets\/\d+\/terminal$/)
 

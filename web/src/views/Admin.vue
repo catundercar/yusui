@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue"
+import { useI18n } from "vue-i18n"
 import { ElMessage } from "element-plus"
 import { api } from "../api"
 
+const { t } = useI18n()
 const tab = ref("projects")
 const projects = ref<any[]>([])
 const agents = ref<any[]>([])
@@ -31,7 +33,7 @@ onMounted(loadAll)
 const wrap = (fn: () => Promise<any>) => async () => {
   try {
     await fn()
-    ElMessage.success("已添加")
+    ElMessage.success(t("common.added"))
     await loadAll()
   } catch (e: any) {
     ElMessage.error(e.message)
@@ -45,79 +47,169 @@ const addCred = wrap(() => api.createCredential(cf.value.asset_id, { ssh_user: c
 </script>
 
 <template>
-  <el-tabs v-model="tab">
-    <el-tab-pane label="项目" name="projects">
-      <el-form :inline="true" style="margin-bottom: 12px">
-        <el-form-item><el-input v-model="pf.code" placeholder="code" /></el-form-item>
-        <el-form-item><el-input v-model="pf.name" placeholder="name" /></el-form-item>
-        <el-form-item><el-input v-model="pf.cidrs" placeholder="cidrs (逗号分隔)" /></el-form-item>
-        <el-button type="primary" @click="addProject">添加项目</el-button>
-      </el-form>
-      <el-table :data="projects" border>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="code" label="code" />
-        <el-table-column prop="name" label="name" />
-        <el-table-column label="cidrs"><template #default="{ row }">{{ (row.cidrs || []).join(", ") }}</template></el-table-column>
-      </el-table>
-    </el-tab-pane>
+  <div class="page">
+    <h2 class="page-title">{{ t("app.navAdmin") }}</h2>
+    <el-tabs v-model="tab" class="admin-tabs">
+      <!-- projects -->
+      <el-tab-pane :label="t('admin.tabProjects')" name="projects">
+        <div class="form-card">
+          <el-form :inline="true">
+            <el-form-item><el-input v-model="pf.code" :placeholder="t('admin.phCode')" /></el-form-item>
+            <el-form-item><el-input v-model="pf.name" :placeholder="t('admin.phName')" /></el-form-item>
+            <el-form-item><el-input v-model="pf.cidrs" :placeholder="t('admin.phCidrs')" /></el-form-item>
+            <el-button type="primary" @click="addProject">{{ t("admin.addProject") }}</el-button>
+          </el-form>
+        </div>
+        <div class="panel">
+          <el-table :data="projects" style="width: 100%">
+            <el-table-column prop="id" :label="t('admin.colId')" width="64" />
+            <el-table-column prop="code" :label="t('admin.colCode')" />
+            <el-table-column prop="name" :label="t('admin.colName')" />
+            <el-table-column :label="t('admin.colCidrs')">
+              <template #default="{ row }"><span class="ys-mono">{{ (row.cidrs || []).join(", ") }}</span></template>
+            </el-table-column>
+            <template #empty><div class="empty">{{ t("admin.emptyProjects") }}</div></template>
+          </el-table>
+        </div>
+      </el-tab-pane>
 
-    <el-tab-pane label="Agent" name="agents">
-      <el-form :inline="true" style="margin-bottom: 12px">
-        <el-form-item><el-select v-model="af.project_id" placeholder="项目"><el-option v-for="p in projects" :key="p.id" :label="p.code" :value="p.id" /></el-select></el-form-item>
-        <el-form-item><el-select v-model="af.role" style="width: 130px"><el-option label="primary" value="primary" /><el-option label="secondary" value="secondary" /></el-select></el-form-item>
-        <el-form-item><el-input v-model="af.hostname" placeholder="hostname" /></el-form-item>
-        <el-button type="primary" @click="addAgent">添加 Agent</el-button>
-      </el-form>
-      <el-table :data="agents" border>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column label="项目"><template #default="{ row }">{{ projMap[row.project_id] }}</template></el-table-column>
-        <el-table-column prop="role" label="role" />
-        <el-table-column prop="hostname" label="hostname" />
-        <el-table-column prop="status" label="status" />
-      </el-table>
-    </el-tab-pane>
+      <!-- agents -->
+      <el-tab-pane :label="t('admin.tabAgents')" name="agents">
+        <div class="form-card">
+          <el-form :inline="true">
+            <el-form-item><el-select v-model="af.project_id" :placeholder="t('admin.phProject')"><el-option v-for="p in projects" :key="p.id" :label="p.code" :value="p.id" /></el-select></el-form-item>
+            <el-form-item><el-select v-model="af.role" style="width: 130px"><el-option label="primary" value="primary" /><el-option label="secondary" value="secondary" /></el-select></el-form-item>
+            <el-form-item><el-input v-model="af.hostname" :placeholder="t('admin.phHostname')" /></el-form-item>
+            <el-button type="primary" @click="addAgent">{{ t("admin.addAgent") }}</el-button>
+          </el-form>
+        </div>
+        <div class="panel">
+          <el-table :data="agents" style="width: 100%">
+            <el-table-column prop="id" :label="t('admin.colId')" width="64" />
+            <el-table-column :label="t('admin.colProject')"><template #default="{ row }">{{ projMap[row.project_id] }}</template></el-table-column>
+            <el-table-column prop="role" :label="t('admin.colRole')" />
+            <el-table-column prop="hostname" :label="t('admin.colHostname')"><template #default="{ row }"><span class="ys-mono">{{ row.hostname }}</span></template></el-table-column>
+            <el-table-column prop="status" :label="t('admin.colStatus')" />
+            <template #empty><div class="empty">{{ t("admin.emptyAgents") }}</div></template>
+          </el-table>
+        </div>
+      </el-tab-pane>
 
-    <el-tab-pane label="资产" name="assets">
-      <el-form :inline="true" style="margin-bottom: 12px">
-        <el-form-item><el-select v-model="sf.project_id" placeholder="项目"><el-option v-for="p in projects" :key="p.id" :label="p.code" :value="p.id" /></el-select></el-form-item>
-        <el-form-item><el-input v-model="sf.name" placeholder="name" /></el-form-item>
-        <el-form-item><el-input v-model="sf.ip_internal" placeholder="10.20.3.7" /></el-form-item>
-        <el-form-item><el-input v-model="sf.ports" placeholder="22" style="width: 120px" /></el-form-item>
-        <el-button type="primary" @click="addAsset">添加资产</el-button>
-      </el-form>
-      <el-table :data="assets" border>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column label="项目"><template #default="{ row }">{{ projMap[row.project_id] }}</template></el-table-column>
-        <el-table-column prop="name" label="name" />
-        <el-table-column prop="ip_internal" label="ip" />
-        <el-table-column label="ports"><template #default="{ row }">{{ (row.ports || []).join(",") }}</template></el-table-column>
-      </el-table>
-    </el-tab-pane>
+      <!-- assets -->
+      <el-tab-pane :label="t('admin.tabAssets')" name="assets">
+        <div class="form-card">
+          <el-form :inline="true">
+            <el-form-item><el-select v-model="sf.project_id" :placeholder="t('admin.phProject')"><el-option v-for="p in projects" :key="p.id" :label="p.code" :value="p.id" /></el-select></el-form-item>
+            <el-form-item><el-input v-model="sf.name" :placeholder="t('admin.phName')" /></el-form-item>
+            <el-form-item><el-input v-model="sf.ip_internal" :placeholder="t('admin.phIp')" /></el-form-item>
+            <el-form-item><el-input v-model="sf.ports" :placeholder="t('admin.phPort')" style="width: 120px" /></el-form-item>
+            <el-button type="primary" @click="addAsset">{{ t("admin.addAsset") }}</el-button>
+          </el-form>
+        </div>
+        <div class="panel">
+          <el-table :data="assets" style="width: 100%">
+            <el-table-column prop="id" :label="t('admin.colId')" width="64" />
+            <el-table-column :label="t('admin.colProject')"><template #default="{ row }">{{ projMap[row.project_id] }}</template></el-table-column>
+            <el-table-column prop="name" :label="t('admin.colName')" />
+            <el-table-column :label="t('admin.colIp')"><template #default="{ row }"><span class="ys-mono ys-tabular">{{ row.ip_internal }}</span></template></el-table-column>
+            <el-table-column :label="t('admin.colPorts')"><template #default="{ row }"><span class="ys-mono ys-tabular">{{ (row.ports || []).join(",") }}</span></template></el-table-column>
+            <template #empty><div class="empty">{{ t("admin.emptyAssets") }}</div></template>
+          </el-table>
+        </div>
+      </el-tab-pane>
 
-    <el-tab-pane label="凭证" name="creds">
-      <el-form :inline="true" style="margin-bottom: 12px">
-        <el-form-item><el-select v-model="cf.asset_id" placeholder="资产"><el-option v-for="a in assets" :key="a.id" :label="a.name + ' (' + a.ip_internal + ')'" :value="a.id" /></el-select></el-form-item>
-        <el-form-item><el-input v-model="cf.ssh_user" placeholder="ssh user" /></el-form-item>
-        <el-form-item><el-select v-model="cf.auth_kind" style="width: 120px"><el-option label="password" value="password" /><el-option label="key" value="key" /></el-select></el-form-item>
-        <el-form-item><el-input v-model="cf.secret" type="password" show-password placeholder="secret / 私钥" /></el-form-item>
-        <el-button type="primary" @click="addCred">保存凭证</el-button>
-      </el-form>
-      <el-alert type="info" :closable="false" title="凭证以 AES-256-GCM 信封加密入库;列表与响应永不回显密文。" />
-    </el-tab-pane>
+      <!-- credentials -->
+      <el-tab-pane :label="t('admin.tabCreds')" name="creds">
+        <div class="form-card">
+          <el-form :inline="true">
+            <el-form-item><el-select v-model="cf.asset_id" :placeholder="t('admin.phAsset')"><el-option v-for="a in assets" :key="a.id" :label="a.name + ' (' + a.ip_internal + ')'" :value="a.id" /></el-select></el-form-item>
+            <el-form-item><el-input v-model="cf.ssh_user" :placeholder="t('admin.phSshUser')" /></el-form-item>
+            <el-form-item><el-select v-model="cf.auth_kind" style="width: 120px"><el-option label="password" value="password" /><el-option label="key" value="key" /></el-select></el-form-item>
+            <el-form-item><el-input v-model="cf.secret" type="password" show-password :placeholder="t('admin.phSecret')" /></el-form-item>
+            <el-button type="primary" @click="addCred">{{ t("admin.saveCred") }}</el-button>
+          </el-form>
+        </div>
+        <el-alert type="info" :closable="false" :title="t('admin.credNote')" />
+      </el-tab-pane>
 
-    <el-tab-pane label="用户" name="users">
-      <el-form :inline="true" style="margin-bottom: 12px">
-        <el-form-item><el-input v-model="uf.username" placeholder="username" /></el-form-item>
-        <el-form-item><el-select v-model="uf.role" style="width: 140px"><el-option label="requester" value="requester" /><el-option label="approver" value="approver" /><el-option label="admin" value="admin" /></el-select></el-form-item>
-        <el-form-item><el-input v-model="uf.password" type="password" show-password placeholder="密码 (≥12, 3 类字符)" /></el-form-item>
-        <el-button type="primary" @click="addUser">添加用户</el-button>
-      </el-form>
-      <el-table :data="users" border>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="username" label="username" />
-        <el-table-column prop="role" label="role" />
-        <el-table-column prop="is_active" label="active" />
-      </el-table>
-    </el-tab-pane>
-  </el-tabs>
+      <!-- users -->
+      <el-tab-pane :label="t('admin.tabUsers')" name="users">
+        <div class="form-card">
+          <el-form :inline="true">
+            <el-form-item><el-input v-model="uf.username" :placeholder="t('admin.phUsername')" /></el-form-item>
+            <el-form-item><el-select v-model="uf.role" style="width: 140px"><el-option :label="t('roles.requester')" value="requester" /><el-option :label="t('roles.approver')" value="approver" /><el-option :label="t('roles.admin')" value="admin" /></el-select></el-form-item>
+            <el-form-item><el-input v-model="uf.password" type="password" show-password :placeholder="t('admin.phPassword')" /></el-form-item>
+            <el-button type="primary" @click="addUser">{{ t("admin.addUser") }}</el-button>
+          </el-form>
+        </div>
+        <div class="panel">
+          <el-table :data="users" style="width: 100%">
+            <el-table-column prop="id" :label="t('admin.colId')" width="64" />
+            <el-table-column prop="username" :label="t('admin.colUsername')" />
+            <el-table-column :label="t('admin.colRole')">
+              <template #default="{ row }"><span :data-role="row.role">{{ t(`roles.${row.role}`) }}</span></template>
+            </el-table-column>
+            <el-table-column :label="t('admin.colActive')">
+              <template #default="{ row }">
+                <span class="ys-status" :class="row.is_active ? 'ok' : 'muted'"><i class="ys-dot" />{{ row.is_active }}</span>
+              </template>
+            </el-table-column>
+            <template #empty><div class="empty">{{ t("admin.emptyUsers") }}</div></template>
+          </el-table>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
+  </div>
 </template>
+
+<style scoped>
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+.page-title {
+  margin: 0 0 12px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+
+.form-card {
+  background: var(--ys-surface);
+  border: 1px solid var(--ys-border);
+  border-radius: var(--ys-radius-lg);
+  box-shadow: var(--ys-shadow-card);
+  padding: 16px 16px 2px;
+  margin-bottom: 16px;
+}
+.form-card :deep(.el-form--inline .el-form-item) {
+  margin-right: 12px;
+}
+
+.panel {
+  background: var(--ys-surface);
+  border: 1px solid var(--ys-border);
+  border-radius: var(--ys-radius-lg);
+  box-shadow: var(--ys-shadow-card);
+  overflow: hidden;
+}
+
+.ys-status {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 500;
+  font-size: 13px;
+}
+.ys-status.ok {
+  color: var(--el-color-success);
+}
+.ys-status.muted {
+  color: var(--ys-muted);
+}
+
+.empty {
+  padding: 28px 0;
+  color: var(--ys-muted);
+  font-size: 13px;
+}
+</style>

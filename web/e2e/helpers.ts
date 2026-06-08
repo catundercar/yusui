@@ -1,4 +1,4 @@
-import { APIRequestContext, expect } from "@playwright/test"
+import { APIRequestContext, Page, expect } from "@playwright/test"
 
 // e2e seeds the backend directly over REST (fast + deterministic), then drives
 // the UI in the browser. API base hits the server directly (not via the web
@@ -11,6 +11,16 @@ export const APPROVER = { username: "appr1", password: "Appr12345!@xy" }
 
 // A stable marker so a spec can locate "its" ticket row in a shared backend.
 export const TICKET_REASON = "e2e critical path"
+
+// loginUI signs in through the actual login form (username defaults to admin in
+// the UI, but we set it explicitly so the helper works for any role).
+export async function loginUI(page: Page, u = ADMIN): Promise<void> {
+  await page.goto("/login")
+  await page.getByPlaceholder("用户名").fill(u.username)
+  await page.getByPlaceholder("密码").fill(u.password)
+  await page.getByRole("button", { name: "登录" }).click()
+  await page.waitForURL(/\/tickets$/)
+}
 
 export async function login(request: APIRequestContext, u: { username: string; password: string }): Promise<string> {
   const res = await request.post(`${API}/api/v1/auth/login`, { data: u })

@@ -11,6 +11,8 @@ deploy/.env
 # frontend (M2+)
 web/node_modules/
 web/dist/
+web/test-results/
+web/playwright-report/
 
 # editor / os
 .DS_Store

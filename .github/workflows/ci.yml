@@ -50,3 +50,53 @@ jobs:
           cd server
           DATABASE_URL="postgres://postgres:postgres@localhost:5432/yusui?sslmode=disable" \
             go run ./cmd/yusui-server migrate
+
+  e2e:
+    # Browser-driven critical path: submit→approve→Web SSH→command filter, plus
+    # the 401-refresh regression guard. Brings up the real stack (PG + sshd
+    # asset + server + web preview) via scripts/e2e-stack.sh, then runs Playwright.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: install web deps
+        run: cd web && npm ci
+      - name: install playwright chromium
+        run: cd web && npx playwright install --with-deps chromium
+      - name: bring up stack + run e2e
+        env:
+          PG_EXTERNAL: "1"
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: |
+          bash scripts/e2e-stack.sh up
+          cd web && npx playwright test
+      - name: dump server/web logs on failure
+        if: failure()
+        run: |
+          echo "=== serve.log ==="; cat /tmp/yusui-e2e-serve.log || true
+          echo "=== web.log ===";   cat /tmp/yusui-e2e-web.log || true
+      - name: upload playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          if-no-files-found: ignore

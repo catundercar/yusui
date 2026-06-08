@@ -128,4 +128,25 @@ export default {
     confirmOk: "确认执行",
     confirmCancel: "取消",
   },
+  // keyed by the backend error `code`; codes with a specific single meaning are
+  // translated, the rest fall back to the server's English `error` text.
+  errors: {
+    account_locked: "账号已锁定,请稍后再试",
+    account_inactive: "账号未启用",
+    mfa_unsupported: "暂不支持多因素认证",
+    invalid_credentials: "用户名或密码错误",
+    invalid_refresh: "登录已过期,请重新登录",
+    stepup_failed: "二次认证失败:密码错误",
+    stepup_required: "该操作需要二次认证",
+    user_not_found: "用户不存在",
+    approver_eq_requester: "审批人不能与申请人相同",
+    ticket_not_found: "工单不存在",
+    ticket_conflict: "工单当前状态不允许该操作",
+    forbidden_not_owner: "无权操作该工单",
+    forbidden: "没有权限",
+    insufficient_role: "当前角色无权访问",
+    already_exists: "资源已存在",
+    unauthorized: "登录已过期,请重新登录",
+    internal: "服务器内部错误",
+  },
 }

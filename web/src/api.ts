@@ -1,4 +1,14 @@
 import { session, setToken, logout } from "./auth"
+import { i18n } from "./i18n"
+
+// errText maps a backend error `code` to a localized message. Codes with a
+// single stable meaning are translated; the rest (e.g. validation) fall back to
+// the server's English `error` text, then to a generic message.
+export function errText(e: any): string {
+  const c = e?.code
+  if (c && i18n.global.te(`errors.${c}`)) return i18n.global.t(`errors.${c}`) as string
+  return e?.message || (i18n.global.t("errors.internal") as string)
+}
 
 // tryRefresh swaps an expired access token for a new one using the refresh
 // token. Returns false if there is no/invalid refresh token.
@@ -37,6 +47,7 @@ async function req(method: string, path: string, body?: any, allowRetry = true):
     if (location.pathname !== "/login") location.href = "/login"
     const e: any = new Error("登录已过期，请重新登录")
     e.status = 401
+    e.code = "unauthorized"
     throw e
   }
 
@@ -45,6 +56,7 @@ async function req(method: string, path: string, body?: any, allowRetry = true):
   if (!res.ok) {
     const e: any = new Error(data?.error || res.statusText)
     e.status = res.status
+    e.code = data?.code
     throw e
   }
   return data
@@ -79,7 +91,7 @@ export async function withStepUp(action: () => Promise<any>, getPassword: () => 
   try {
     return await action()
   } catch (e: any) {
-    if (e.status === 403 && String(e.message).includes("step-up")) {
+    if (e.status === 403 && e.code === "stepup_required") {
       const pw = await getPassword()
       const d = await api.stepup(pw)
       setToken(d.access_token)

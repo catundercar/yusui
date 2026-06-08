@@ -3,9 +3,11 @@ import { ref } from "vue"
 import { useRouter } from "vue-router"
 import { useI18n } from "vue-i18n"
 import { ElMessage } from "element-plus"
-import { api } from "../api"
+import { Moon, Sunny } from "@element-plus/icons-vue"
+import { api, errText } from "../api"
 import { setSession } from "../auth"
 import { setLang, type Lang } from "../i18n"
+import { theme, toggleTheme } from "../theme"
 
 const router = useRouter()
 const { t, locale } = useI18n()
@@ -21,7 +23,7 @@ async function submit() {
     setSession(d.access_token, d.refresh_token, d.user)
     router.push("/tickets")
   } catch (e: any) {
-    ElMessage.error(e.message || t("login.failed"))
+    ElMessage.error(errText(e))
   } finally {
     loading.value = false
   }
@@ -33,9 +35,17 @@ function switchLang(l: Lang) {
 
 <template>
   <div class="login">
-    <div class="login-lang" role="group" :aria-label="t('app.language')">
-      <button :class="{ on: locale === 'zh' }" @click="switchLang('zh')">中</button>
-      <button :class="{ on: locale === 'en' }" @click="switchLang('en')">EN</button>
+    <div class="login-top">
+      <button class="login-theme" :aria-label="theme === 'dark' ? 'light' : 'dark'" @click="toggleTheme">
+        <el-icon :size="16">
+          <Moon v-if="theme === 'light'" />
+          <Sunny v-else />
+        </el-icon>
+      </button>
+      <div class="login-lang" role="group" :aria-label="t('app.language')">
+        <button :class="{ on: locale === 'zh' }" @click="switchLang('zh')">中</button>
+        <button :class="{ on: locale === 'en' }" @click="switchLang('en')">EN</button>
+      </div>
     </div>
 
     <div class="login-box">
@@ -85,10 +95,29 @@ function switchLang(l: Lang) {
     radial-gradient(120% 60% at 50% -10%, rgba(79, 70, 229, 0.06), transparent 60%),
     var(--ys-canvas);
 }
-.login-lang {
+.login-top {
   position: absolute;
   top: 20px;
   right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.login-theme {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--ys-border);
+  border-radius: var(--ys-radius);
+  background: var(--ys-surface);
+  color: var(--ys-muted);
+  cursor: pointer;
+}
+.login-theme:hover {
+  color: var(--ys-accent);
+}
+.login-lang {
   display: inline-flex;
   border: 1px solid var(--ys-border);
   border-radius: var(--ys-radius);

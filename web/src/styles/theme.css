@@ -313,3 +313,72 @@ body {
 .el-alert {
   border-radius: var(--ys-radius);
 }
+
+/* --------------------------------------------------------------- dark ---- */
+/* Loaded on top of element-plus dark css-vars (see main.ts). Depth on dark is
+ * luminance stepping + hairline white-alpha borders, not drop shadows. */
+html.dark {
+  --el-color-primary: #6366f1;
+  --el-color-primary-dark-2: #818cf8;
+  --el-color-primary-light-3: #565fd6;
+  --el-color-primary-light-5: #444c9e;
+  --el-color-primary-light-7: #2f3568;
+  --el-color-primary-light-8: #23284d;
+  --el-color-primary-light-9: #191c38;
+
+  --el-text-color-primary: #e6e8ee;
+  --el-text-color-regular: #c4c8d2;
+  --el-text-color-secondary: #8b93a3;
+  --el-text-color-placeholder: #5f6675;
+  --el-text-color-disabled: #4a5060;
+
+  --el-bg-color: #15171d;
+  --el-bg-color-page: #0c0e13;
+  --el-bg-color-overlay: #15171d;
+  --el-fill-color-blank: #15171d;
+  --el-fill-color: #1b1e26;
+  --el-fill-color-light: #181b22;
+  --el-fill-color-lighter: #14161c;
+  --el-fill-color-dark: #20242e;
+
+  --el-border-color: rgba(255, 255, 255, 0.1);
+  --el-border-color-light: rgba(255, 255, 255, 0.08);
+  --el-border-color-lighter: rgba(255, 255, 255, 0.06);
+  --el-border-color-extra-light: rgba(255, 255, 255, 0.04);
+  --el-border-color-dark: rgba(255, 255, 255, 0.14);
+  --el-border-color-hover: rgba(255, 255, 255, 0.22);
+
+  --el-box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  --el-box-shadow-light: 0 2px 8px rgba(0, 0, 0, 0.4);
+
+  --ys-canvas: #0c0e13;
+  --ys-surface: #15171d;
+  --ys-accent: #818cf8;
+  --ys-accent-soft: #1e2147;
+  --ys-text: #e6e8ee;
+  --ys-muted: #8b93a3;
+  --ys-border: rgba(255, 255, 255, 0.1);
+  --ys-border-strong: rgba(255, 255, 255, 0.16);
+  --ys-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --ys-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+html.dark body {
+  background: var(--ys-canvas);
+  color: var(--ys-text);
+}
+html.dark * {
+  scrollbar-color: #3a4150 transparent;
+}
+html.dark *::-webkit-scrollbar-thumb {
+  background: #3a4150;
+}
+html.dark .el-table {
+  --el-table-header-bg-color: #181b22;
+  --el-table-row-hover-bg-color: #1b1f29;
+  --el-table-tr-bg-color: var(--ys-surface);
+  --el-table-bg-color: var(--ys-surface);
+}
+html.dark .el-card,
+html.dark .el-button--primary {
+  box-shadow: none;
+}

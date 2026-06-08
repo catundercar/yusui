@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from "vue"
 import { useI18n } from "vue-i18n"
 import { ElMessage } from "element-plus"
-import { api } from "../api"
+import { api, errText } from "../api"
 
 const { t } = useI18n()
 const tab = ref("projects")
@@ -25,7 +25,7 @@ async function loadAll() {
     assets.value = (await api.listAssets()) || []
     users.value = (await api.listUsers()) || []
   } catch (e: any) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   }
 }
 onMounted(loadAll)
@@ -36,7 +36,7 @@ const wrap = (fn: () => Promise<any>) => async () => {
     ElMessage.success(t("common.added"))
     await loadAll()
   } catch (e: any) {
-    ElMessage.error(e.message)
+    ElMessage.error(errText(e))
   }
 }
 const addProject = wrap(() => api.createProject({ code: pf.value.code, name: pf.value.name, cidrs: pf.value.cidrs.split(",").map((s: string) => s.trim()) }))

@@ -67,6 +67,10 @@ message AckCommand {
   string command_id = 1;
   AckResult result = 2;
   string error_msg = 3;
+  // draft10: on a successful ApplyRule, the Agent's userspace forwarder reports
+  // the overlay address (host:port) the Server should dial to reach the asset.
+  // Empty for the kernel nft enforcer (Server dials the asset IP directly).
+  string forward_addr = 4;
 }
 
 enum AckResult {

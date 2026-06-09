@@ -113,7 +113,7 @@ func (c *Client) session(ctx context.Context, cli agentv1.AgentControlClient) er
 				res = agentv1.AckResult_ACK_RESULT_FAILED
 				errMsg = err.Error()
 			}
-			_ = send(ack(r.CommandId, res, errMsg))
+			_ = send(ack(r.CommandId, res, errMsg, ""))
 		case *agentv1.ServerToAgent_Reconcile:
 			_ = send(&agentv1.AgentToServer{Msg: &agentv1.AgentToServer_ReconcileResp{ReconcileResp: &agentv1.ReconcileResponse{
 				CommandId: m.Reconcile.CommandId, ActiveRuleIds: c.eng.ActiveRuleIDs(),
@@ -132,22 +132,21 @@ func (c *Client) handleApply(ctx context.Context, a *agentv1.ApplyRule) *agentv1
 	srcs := a.SrcPeerIps
 	if len(srcs) == 0 {
 		c.logger.Error("apply failed", "rule", a.RuleId, "err", "no src_peer_ips")
-		return ack(a.CommandId, agentv1.AckResult_ACK_RESULT_FAILED, "no src_peer_ips in ApplyRule")
+		return ack(a.CommandId, agentv1.AckResult_ACK_RESULT_FAILED, "no src_peer_ips in ApplyRule", "")
 	}
 	fwd, err := c.eng.Apply(ctx, a.RuleId, srcs, a.DstIp, a.DstPort, ttl)
 	if err != nil {
 		c.logger.Error("apply failed", "rule", a.RuleId, "err", err)
-		return ack(a.CommandId, agentv1.AckResult_ACK_RESULT_FAILED, err.Error())
+		return ack(a.CommandId, agentv1.AckResult_ACK_RESULT_FAILED, err.Error(), "")
 	}
-	// draft10: fwd is the overlay address the Server should dial to reach the
-	// asset. Returning it over the wire (AckCommand.forward_addr) is a follow-up
-	// (proto regen + Server dial); log it until then.
+	// draft10: report the forwarder's overlay listen address; the Server dials it
+	// to reach the asset (empty for the kernel nft enforcer).
 	c.logger.Info("applied rule", "rule", a.RuleId, "dst", a.DstIp, "port", a.DstPort, "srcs", len(srcs), "forward_addr", fwd)
-	return ack(a.CommandId, agentv1.AckResult_ACK_RESULT_OK, "")
+	return ack(a.CommandId, agentv1.AckResult_ACK_RESULT_OK, "", fwd)
 }
 
-func ack(cmdID string, res agentv1.AckResult, errMsg string) *agentv1.AgentToServer {
+func ack(cmdID string, res agentv1.AckResult, errMsg, forwardAddr string) *agentv1.AgentToServer {
 	return &agentv1.AgentToServer{Msg: &agentv1.AgentToServer_Ack{Ack: &agentv1.AckCommand{
-		CommandId: cmdID, Result: res, ErrorMsg: errMsg,
+		CommandId: cmdID, Result: res, ErrorMsg: errMsg, ForwardAddr: forwardAddr,
 	}}}
 }

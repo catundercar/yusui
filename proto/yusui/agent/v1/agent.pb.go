@@ -659,10 +659,14 @@ func (x *Heartbeat) GetNetbirdStatus() string {
 }
 
 type AckCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
-	Result        AckResult              `protobuf:"varint,2,opt,name=result,proto3,enum=yusui.agent.v1.AckResult" json:"result,omitempty"`
-	ErrorMsg      string                 `protobuf:"bytes,3,opt,name=error_msg,json=errorMsg,proto3" json:"error_msg,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	Result    AckResult              `protobuf:"varint,2,opt,name=result,proto3,enum=yusui.agent.v1.AckResult" json:"result,omitempty"`
+	ErrorMsg  string                 `protobuf:"bytes,3,opt,name=error_msg,json=errorMsg,proto3" json:"error_msg,omitempty"`
+	// draft10: on a successful ApplyRule, the Agent's userspace forwarder reports
+	// the overlay address (host:port) the Server should dial to reach the asset.
+	// Empty for the kernel nft enforcer (Server dials the asset IP directly).
+	ForwardAddr   string `protobuf:"bytes,4,opt,name=forward_addr,json=forwardAddr,proto3" json:"forward_addr,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -714,6 +718,13 @@ func (x *AckCommand) GetResult() AckResult {
 func (x *AckCommand) GetErrorMsg() string {
 	if x != nil {
 		return x.ErrorMsg
+	}
+	return ""
+}
+
+func (x *AckCommand) GetForwardAddr() string {
+	if x != nil {
+		return x.ForwardAddr
 	}
 	return ""
 }
@@ -1434,13 +1445,14 @@ const file_yusui_agent_v1_agent_proto_rawDesc = "" +
 	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\x123\n" +
 	"\x06status\x18\x02 \x01(\x0e2\x1b.yusui.agent.v1.AgentStatusR\x06status\x12!\n" +
 	"\factive_rules\x18\x03 \x01(\x04R\vactiveRules\x12%\n" +
-	"\x0enetbird_status\x18\x04 \x01(\tR\rnetbirdStatus\"{\n" +
+	"\x0enetbird_status\x18\x04 \x01(\tR\rnetbirdStatus\"\x9e\x01\n" +
 	"\n" +
 	"AckCommand\x12\x1d\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tR\tcommandId\x121\n" +
 	"\x06result\x18\x02 \x01(\x0e2\x19.yusui.agent.v1.AckResultR\x06result\x12\x1b\n" +
-	"\terror_msg\x18\x03 \x01(\tR\berrorMsg\"\xa6\x01\n" +
+	"\terror_msg\x18\x03 \x01(\tR\berrorMsg\x12!\n" +
+	"\fforward_addr\x18\x04 \x01(\tR\vforwardAddr\"\xa6\x01\n" +
 	"\tRuleEvent\x12\x17\n" +
 	"\arule_id\x18\x01 \x01(\tR\x06ruleId\x121\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1d.yusui.agent.v1.RuleEventKindR\x04kind\x12!\n" +

@@ -147,6 +147,12 @@ func (c *Controller) Control(stream agentv1.AgentControl_ControlServer) error {
 		}
 		switch m := in.Msg.(type) {
 		case *agentv1.AgentToServer_Ack:
+			if m.Ack.ForwardAddr != "" {
+				// draft10: the Agent's userspace forwarder reported its overlay
+				// listen address. Persisting it on the binding + having Web Shell
+				// dial it is the next step (needs a real-agent test harness).
+				c.logger.Info("agent forward address", "cmd", m.Ack.CommandId, "forward_addr", m.Ack.ForwardAddr)
+			}
 			conn.mu.Lock()
 			if ch := conn.acks[m.Ack.CommandId]; ch != nil {
 				ch <- m.Ack

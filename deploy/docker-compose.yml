@@ -10,12 +10,17 @@ services:
       YUSUI_MIGRATE_PASSWORD: ${YUSUI_MIGRATE_PASSWORD:-migratesecret}
       YUSUI_APP_PASSWORD: ${YUSUI_APP_PASSWORD:-appsecret}
     ports:
-      # Host 5432 is often taken; publish on 5433 (server reaches PG over the
+      # Host 5432 is often taken; publish on 5433 (services reach PG over the
       # compose network regardless). Override with POSTGRES_HOST_PORT.
       - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d yusui"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   # One-shot: applies migrations as the DDL-owner role, then exits.
   migrate:
@@ -27,10 +32,12 @@ services:
       DATABASE_URL: postgres://yusui_migrate:${YUSUI_MIGRATE_PASSWORD:-migratesecret}@postgres:5432/yusui?sslmode=disable
     depends_on:
       postgres:
-        condition: service_started   # app retries the ping; no healthcheck needed
+        condition: service_healthy
     restart: "no"
 
-  # Long-running server connects as the least-privilege app role.
+  # Long-running server connects as the least-privilege app role. Mock agent
+  # gateway (no real Agent/NetBird needed for a local stack). On first boot with
+  # an empty users table it seeds the admin from ADMIN_USERNAME/ADMIN_PASSWORD.
   server:
     build:
       context: ..
@@ -39,12 +46,30 @@ services:
     environment:
       DATABASE_URL: postgres://yusui_app:${YUSUI_APP_PASSWORD:-appsecret}@postgres:5432/yusui?sslmode=disable
       HTTP_ADDR: ":8080"
-      LOG_LEVEL: info
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me-please}
+      CREDENTIAL_KEY: ${CREDENTIAL_KEY:-dev-credential-key-change-me}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-Admin12345!@}
+      AGENT_GATEWAY: mock
+      # nonroot-writable path (distroless); recordings are created lazily.
+      RECORDINGS_DIR: /home/nonroot/recordings
     ports:
-      - "8080:8080"
+      - "${SERVER_HOST_PORT:-8080}:8080"
     depends_on:
       migrate:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  # Static SPA + same-origin /api proxy (REST + WebSocket) to the server.
+  web:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+    ports:
+      - "${WEB_HOST_PORT:-8088}:80"
+    depends_on:
+      - server
     restart: unless-stopped
 
 volumes:

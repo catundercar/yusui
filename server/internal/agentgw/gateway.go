@@ -28,7 +28,12 @@ type ApplyInput struct {
 
 // Gateway pushes/removes per-ticket ACL rules on a project Agent.
 type Gateway interface {
-	ApplyRule(ctx context.Context, in ApplyInput) error
+	// ApplyRule programs the rule and returns the address the Server should dial
+	// to reach the ticket's asset (draft10: the Agent's userspace forwarder
+	// listen address). Empty when the asset is dialled directly (mock gateway, or
+	// the kernel nft enforcer). For multi-target tickets this is the first
+	// target's address (MVP tickets are single-target).
+	ApplyRule(ctx context.Context, in ApplyInput) (forwardAddr string, err error)
 	RevokeRule(ctx context.Context, agentID int64, ruleID string) error
 	Reconcile(ctx context.Context, agentID int64) ([]string, error)
 }
@@ -45,15 +50,16 @@ func NewMemory(logger *slog.Logger) *Memory {
 	return &Memory{rules: make(map[string]ApplyInput), logger: logger}
 }
 
-// ApplyRule records the rule.
-func (m *Memory) ApplyRule(_ context.Context, in ApplyInput) error {
+// ApplyRule records the rule. The mock has no forwarder, so the Server keeps
+// dialling the asset IP directly: forwardAddr is "".
+func (m *Memory) ApplyRule(_ context.Context, in ApplyInput) (string, error) {
 	m.mu.Lock()
 	m.rules[in.RuleID] = in
 	n := len(m.rules)
 	m.mu.Unlock()
 	m.logger.Info("mock-agent apply", "rule_id", in.RuleID, "agent_id", in.AgentID,
 		"targets", len(in.Targets), "expires_at", in.ExpiresAt, "active_rules", n)
-	return nil
+	return "", nil
 }
 
 // RevokeRule removes the rule (idempotent).

@@ -21,6 +21,12 @@ type CredentialOpener interface {
 	OpenCredentialSecret(ctx context.Context, assetID int64) (sshUser, secret, authKind string, err error)
 }
 
+// ForwardResolver maps a ticket to the Agent forwarder address the Server should
+// dial, or "" to dial the asset directly (draft10; satisfied by the Policy Engine).
+type ForwardResolver interface {
+	ResolveForward(ticketID int64) string
+}
+
 // Manager owns live sessions (one per ticket in v0.1) and force-close.
 type Manager struct {
 	db      *store.DB
@@ -29,6 +35,7 @@ type Manager struct {
 	recDir  string
 	logger  *slog.Logger
 	dialTO  time.Duration
+	fwd     ForwardResolver
 
 	mu       sync.Mutex
 	sessions map[int64]*Session // ticketID -> session
@@ -41,6 +48,10 @@ func NewManager(db *store.DB, creds CredentialOpener, recDir string, logger *slo
 		logger: logger, dialTO: 10 * time.Second, sessions: map[int64]*Session{},
 	}
 }
+
+// SetForwardResolver wires the per-ticket forwarder lookup (set after
+// construction to avoid an import cycle with the Policy Engine).
+func (m *Manager) SetForwardResolver(r ForwardResolver) { m.fwd = r }
 
 // Ruleset returns the active command-filter ruleset.
 func (m *Manager) Ruleset() *Ruleset { return m.ruleset }
@@ -71,7 +82,20 @@ func (m *Manager) OpenForTicket(ctx context.Context, t store.YusuiTicket) (*Sess
 		return nil, fmt.Errorf("credential: %w", err)
 	}
 
-	client, err := dialSSH(asset.IpInternal.String(), t.Ports[0], sshUser, secret, authKind, m.dialTO)
+	// draft10: dial the project Agent's userspace forwarder when one is registered
+	// for this ticket; otherwise dial the asset directly (mock gateway / dev).
+	host, port := asset.IpInternal.String(), t.Ports[0]
+	if m.fwd != nil {
+		if a := m.fwd.ResolveForward(t.ID); a != "" {
+			if h, ps, serr := net.SplitHostPort(a); serr == nil {
+				if pn, perr := strconv.Atoi(ps); perr == nil {
+					host, port = h, int32(pn)
+					m.logger.Info("dialing asset via agent forwarder", "ticket", t.PubID, "forward_addr", a)
+				}
+			}
+		}
+	}
+	client, err := dialSSH(host, port, sshUser, secret, authKind, m.dialTO)
 	if err != nil {
 		return nil, fmt.Errorf("ssh dial: %w", err)
 	}

@@ -9,6 +9,10 @@
 
 **严格只调 Mgmt REST API**。不直接读 NetBird 数据库、不解析 NetBird 内部协议、不 patch NetBird 源码。
 
+> **v0.1-draft10（重大收敛）**：取消「项目私网 CIDR → NetBird Network Route」广播。NetBird 只保留唯一常驻策略（`server-peer-group → all-agents-group, accept`）。Server 不再把资产网段路由进 overlay，而是直连**目标项目 Agent 的 overlay IP**，由 Agent 的用户态 per-ticket L4 转发器把字节转给资产（见 [02 §2.3](02-agent-design.md)、[03 §3.2 `ApplyRule`](03-agent-protocol.md)）。
+>
+> 这样做的根本原因:**不同项目可以有相同/重叠的私网**（`assets` 唯一键是 `(project_id, ip_internal)`，[06](06-data-model.md)）。一旦把真实 CIDR 广播成 Route，两个 Agent 广播同一 `10.0.0.0/24` 会造成 overlay 路由冲突，Server `dial(10.0.0.5)` 无法区分目标项目。取消 Route 后 overlay 里**根本不出现资产网段**，冲突消失。代价:`projects.cidrs` 退化为作用域/校验元数据,不再是路由原语;`AssignNetworkRoute` 接口移除。
+
 ## 4.2 概念映射
 
 | YuSui 领域 | NetBird 概念 | 关系 |
@@ -17,8 +21,8 @@
 | Project | Group（`yusui:project:<code>:agents`）| 1:1，Project 创建时一并建 Group |
 | Agent | Peer | 1:1，Peer 加入 `yusui:project:<code>:agents` Group |
 | Asset | （无对应概念） | YuSui 私有，NetBird 不感知 |
-| Ticket | （无对应概念）| **v0.1-draft6 起 NetBird 不感知 ticket**；细粒度 ACL 在 Agent nftables |
-| Project CIDR | Network Route | 挂在 Agent Peer 上 |
+| Ticket | （无对应概念）| **v0.1-draft6 起 NetBird 不感知 ticket**；细粒度 ACL 在 Agent（draft10 起为用户态 per-ticket L4 转发器） |
+| Project CIDR | （无对应概念，draft10） | 不再广播为 Network Route；仅作 YuSui 内部作用域/校验元数据 |
 | 常驻策略 | Policy（`yusui:builtin:server-to-agents`）| 单例，Server 启动期建立；不再 per-ticket |
 
 ## 4.3 接口
@@ -35,7 +39,7 @@ type Adapter interface {
   // 项目 / Agent（运维触发）
   EnsureProjectGroup(ctx, projectCode string) (groupID string, err error)
   AddAgentToProjectGroup(ctx, agentPeerID, projectGroupID string) error
-  AssignNetworkRoute(ctx, peerID string, cidrs []netip.Prefix) (routeID string, err error)
+  // draft10 移除 AssignNetworkRoute：不再广播 Project CIDR 为 Route（见 §4.1）。
   RemoveAgent(ctx, peerID string) error
 
   // 对账
@@ -87,9 +91,9 @@ Server 启动期一次性写入（首次安装或对账发现缺失时）：
 | 时机 | NetBird API 调用数 |
 |---|---|
 | Server 启动 | ≤ 10（自我注册 + 常驻策略校验/创建 + 全量项目 Group 对账） |
-| 项目创建 | 2-3（建 Group + PATCH 常驻策略 destinations + 建 Route 占位） |
-| Agent 注册 | 2（建 Peer / 加入 Group / 挂 Route） |
-| 项目删除 | 2-3（PATCH 常驻策略移除 destinations + 删 Group + 删 Route） |
+| 项目创建 | 1-2（建 Group + PATCH 常驻策略 destinations） |
+| Agent 注册 | 1-2（建/确认 Peer + 加入 Group；draft10 起无挂 Route） |
+| 项目删除 | 1-2（PATCH 常驻策略移除 destinations + 删 Group） |
 | 工单 Apply | **0** |
 | 工单 Revoke | **0** |
 | 周期对账 | 4-5（GET 常驻策略 / GET 所有 yusui-group / GET 所有 yusui-peer / 比对） |
@@ -163,6 +167,7 @@ Server 启动后立即执行：
 
 ## 4.13 未决问题
 
+- （draft10 已决）跨项目重叠私网:通过取消 Route 广播 + Agent 用户态 L4 转发解决,不再依赖 NetBird 路由消歧。`cidrs` 的去留:保留作 asset IP 归属校验(`asset.ip_internal ∈ 某 cidr`)与文档,不参与路由。
 - 常驻策略 `destinations` 列表过长（>50 项目）时 PATCH 性能：评估单 Policy 切分为多条（按项目分桶）。
 - 多 NetBird Mgmt 实例（不同地域）联邦？v1.0 之前不考虑，单 Mgmt 单实例。
 - NetBird Setup Key 的生命周期管理：YuSui 自己签 vs 用 NetBird 接口生成？倾向后者（少存敏感物）。

@@ -77,6 +77,9 @@ message AckCommand {
   string command_id = 1;
   AckResult result  = 2;
   string error_msg  = 3;  // 非 OK 时
+  // draft10：ApplyRule 成功时回传 Agent 为该工单开的转发器监听地址（overlay-ip:合成端口）。
+  // Server 存进 policy_bindings，Web Shell 用它连接，替代直连资产 IP（解决跨项目重叠私网）。
+  string forward_addr = 4;
 }
 
 enum AckResult { OK = 0; FAILED = 1; PARTIAL = 2; SKIPPED = 3; }
@@ -91,7 +94,7 @@ message RuleEvent {
 enum RuleEventKind {
   RULE_APPLIED = 0;
   RULE_REVOKED = 1;
-  RULE_EXPIRED_LOCAL = 2;  // nftables timeout 触发
+  RULE_EXPIRED_LOCAL = 2;  // draft10：转发器到期本地关闭触发（旧：nftables timeout）
   RULE_HIT_FIRST    = 3;   // 第一次命中
   RULE_HIT_LAST     = 4;   // 撤销时上报最终计数
 }
@@ -119,22 +122,24 @@ message ServerToAgent {
 
 message ApplyRule {
   string command_id = 1;
-  string rule_id    = 2;     // YuSui 全局唯一；写进 nft element comment
+  string rule_id    = 2;     // YuSui 全局唯一；标识该工单的转发器（draft10；旧：写进 nft comment）
   string ticket_id  = 3;     // 反向追溯
   // src_peer_ip 已弃用（draft6）；保留以兼容 N-1 Agent 解析
   string src_peer_ip = 4 [deprecated = true];
-  // draft7：多源 IP。v0.1 通常 1 个（Server 单副本）；v0.3 Server 水平扩展时多副本各为独立 Peer，每副本都要能 dial 资产
+  // draft7：多源 IP。v0.1 通常 1 个（Server 单副本）；v0.3 Server 水平扩展时多副本各为独立 Peer。
+  // draft10：作为转发器的**源白名单**——listener 只接受这些 overlay 源 IP 的连接。
   // v0.2 access_kind=jumpserver 时再加 jumpserver-peer-ip
   repeated string src_peer_ips = 9;
-  string dst_ip     = 5;     // 资产 IP
+  string dst_ip     = 5;     // 资产 IP（Agent 本地 LAN 可达）
   uint32 dst_port   = 6;
   Protocol proto    = 7;
   google.protobuf.Timestamp expires_at = 8;
 }
 
-// Agent 行为：把 src_peer_ips 展开成 set element（每 src 一条），共用 rule_id（写 nft comment）。
-// Revoke 时按 rule_id 一次性删全部展开 element。
+// Agent 行为（draft10）：为该 rule_id 在 overlay IP 上开一个 listener，只接受 src_peer_ips 来源的连接，
+// 全部转发到 dst_ip:dst_port；监听地址经 AckCommand.forward_addr 回传。Revoke / expires_at 到期则关 listener。
 // Agent N-1 兼容：若收到老 ApplyRule（仅 src_peer_ip 字段），等价于 src_peer_ips=[src_peer_ip]。
+// 旧（draft1~9，可选 Linux nftables 实现）：把 src_peer_ips 展开成 set element，按 rule_id 一次性删。
 
 enum Protocol { TCP = 0; UDP = 1; ANY = 2; }
 
@@ -169,8 +174,8 @@ message Drain {
 **幂等性**：所有 `ApplyRule` / `RevokeRule` 携带 `rule_id`。Agent 内部按 rule_id 去重，重复 Apply 等价于"确保存在"，重复 Revoke 等价于"确保不存在"。Server 可放心重试。
 
 **ack 时机**：
-- `ApplyRule` 必须在 nftables 真正写入后 ack。失败要立即上报 FAILED + 错误信息，不重试由 Server 决定。
-- `RevokeRule` 删除 nft 元素后 ack。如果元素已不存在，返回 OK（幂等）。
+- `ApplyRule` 在转发器 listener 起好后 ack，并在 `AckCommand.forward_addr` 回传监听地址（draft10）。失败立即上报 FAILED + 错误信息，是否重试由 Server 决定。
+- `RevokeRule` 关闭 listener（并断开活动连接）后 ack。如果 listener 已不存在，返回 OK（幂等）。
 - `ReconcileRequest` 收到后立即返回完整规则清单，不分页（10k 规模够用）。
 
 **顺序保证**：双向流内消息严格有序。Server 不会在同一 stream 上对同一 rule_id 发出乱序命令（例如先 Revoke 再 Apply）。

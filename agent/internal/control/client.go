@@ -1,5 +1,5 @@
 // Package control is the Agent's gRPC client: it registers, opens the Control
-// stream, and applies/revokes nftables rules on command (docs/03).
+// stream, and applies/revokes per-ticket access via an Enforcer (docs/03).
 package control
 
 import (
@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/catundercar/yusui/agent/internal/nft"
+	"github.com/catundercar/yusui/agent/internal/enforcer"
 	agentv1 "github.com/catundercar/yusui/proto/yusui/agent/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -23,12 +23,12 @@ type Client struct {
 	registerToken string
 	hostname      string
 	version       string
-	eng           *nft.Engine
+	eng           enforcer.Enforcer
 	logger        *slog.Logger
 }
 
 // New constructs the control client.
-func New(serverAddr, projectCode, registerToken, hostname, version string, eng *nft.Engine, logger *slog.Logger) *Client {
+func New(serverAddr, projectCode, registerToken, hostname, version string, eng enforcer.Enforcer, logger *slog.Logger) *Client {
 	return &Client{serverAddr: serverAddr, projectCode: projectCode, registerToken: registerToken, hostname: hostname, version: version, eng: eng, logger: logger}
 }
 
@@ -130,25 +130,20 @@ func (c *Client) handleApply(ctx context.Context, a *agentv1.ApplyRule) *agentv1
 		ttl = time.Until(a.ExpiresAt.AsTime())
 	}
 	srcs := a.SrcPeerIps
-	res := agentv1.AckResult_ACK_RESULT_OK
-	errMsg := ""
 	if len(srcs) == 0 {
-		res = agentv1.AckResult_ACK_RESULT_FAILED
-		errMsg = "no src_peer_ips in ApplyRule"
+		c.logger.Error("apply failed", "rule", a.RuleId, "err", "no src_peer_ips")
+		return ack(a.CommandId, agentv1.AckResult_ACK_RESULT_FAILED, "no src_peer_ips in ApplyRule")
 	}
-	for _, src := range srcs {
-		if err := c.eng.Apply(ctx, a.RuleId, src, a.DstIp, a.DstPort, ttl); err != nil {
-			res = agentv1.AckResult_ACK_RESULT_FAILED
-			errMsg = err.Error()
-			break
-		}
+	fwd, err := c.eng.Apply(ctx, a.RuleId, srcs, a.DstIp, a.DstPort, ttl)
+	if err != nil {
+		c.logger.Error("apply failed", "rule", a.RuleId, "err", err)
+		return ack(a.CommandId, agentv1.AckResult_ACK_RESULT_FAILED, err.Error())
 	}
-	if res == agentv1.AckResult_ACK_RESULT_OK {
-		c.logger.Info("applied rule", "rule", a.RuleId, "dst", a.DstIp, "port", a.DstPort, "srcs", len(srcs))
-	} else {
-		c.logger.Error("apply failed", "rule", a.RuleId, "err", errMsg)
-	}
-	return ack(a.CommandId, res, errMsg)
+	// draft10: fwd is the overlay address the Server should dial to reach the
+	// asset. Returning it over the wire (AckCommand.forward_addr) is a follow-up
+	// (proto regen + Server dial); log it until then.
+	c.logger.Info("applied rule", "rule", a.RuleId, "dst", a.DstIp, "port", a.DstPort, "srcs", len(srcs), "forward_addr", fwd)
+	return ack(a.CommandId, agentv1.AckResult_ACK_RESULT_OK, "")
 }
 
 func ack(cmdID string, res agentv1.AckResult, errMsg string) *agentv1.AgentToServer {

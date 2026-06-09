@@ -1,10 +1,14 @@
-// Command yusui-agent is the per-project routing peer / local ACL executor:
-// it connects to the Server's Agent Controller over gRPC and programs nftables
-// per-ticket rules (docs/02, docs/03).
+// Command yusui-agent is the per-project NetBird peer + local per-ticket access
+// executor: it connects to the Server's Agent Controller over gRPC and programs
+// per-ticket access via an Enforcer (docs/02, docs/03).
+//
+// draft10: the default Enforcer is the cross-platform userspace L4 forwarder
+// (works on Windows); set YUSUI_ENFORCER=nft for the optional Linux kernel engine.
 //
 // Env: YUSUI_SERVER_GRPC, YUSUI_PROJECT, YUSUI_REGISTER_TOKEN,
 //
-//	YUSUI_HOSTNAME (default os hostname), YUSUI_EGRESS_IFACE (masquerade).
+//	YUSUI_HOSTNAME (default os hostname), YUSUI_ENFORCER (forward|nft),
+//	YUSUI_LISTEN_HOST (overlay IP to bind forwarders), YUSUI_EGRESS_IFACE (nft masquerade).
 package main
 
 import (
@@ -16,6 +20,8 @@ import (
 	"syscall"
 
 	"github.com/catundercar/yusui/agent/internal/control"
+	"github.com/catundercar/yusui/agent/internal/enforcer"
+	"github.com/catundercar/yusui/agent/internal/forward"
 	"github.com/catundercar/yusui/agent/internal/nft"
 )
 
@@ -26,13 +32,15 @@ func main() {
 	hostname, _ := os.Hostname()
 
 	cfg := struct {
-		serverGRPC, project, token, host, iface string
+		serverGRPC, project, token, host, iface, enforcerKind, listenHost string
 	}{
-		serverGRPC: getenv("YUSUI_SERVER_GRPC", "localhost:9090"),
-		project:    os.Getenv("YUSUI_PROJECT"),
-		token:      os.Getenv("YUSUI_REGISTER_TOKEN"),
-		host:       getenv("YUSUI_HOSTNAME", hostname),
-		iface:      os.Getenv("YUSUI_EGRESS_IFACE"),
+		serverGRPC:   getenv("YUSUI_SERVER_GRPC", "localhost:9090"),
+		project:      os.Getenv("YUSUI_PROJECT"),
+		token:        os.Getenv("YUSUI_REGISTER_TOKEN"),
+		host:         getenv("YUSUI_HOSTNAME", hostname),
+		iface:        os.Getenv("YUSUI_EGRESS_IFACE"),
+		enforcerKind: getenv("YUSUI_ENFORCER", "forward"),
+		listenHost:   os.Getenv("YUSUI_LISTEN_HOST"),
 	}
 	if cfg.project == "" {
 		logger.Error("YUSUI_PROJECT is required")
@@ -43,11 +51,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	eng := nft.New(cfg.iface, logger)
+	var eng enforcer.Enforcer
+	switch cfg.enforcerKind {
+	case "nft":
+		eng = nft.New(cfg.iface, logger) // optional Linux kernel engine (needs CAP_NET_ADMIN + nft)
+	default:
+		eng = forward.New(cfg.listenHost, logger) // draft10 default: cross-platform userspace L4 forwarder
+	}
 	if err := eng.Setup(ctx); err != nil {
-		logger.Error("nftables setup failed (need CAP_NET_ADMIN + nft)", "err", err)
+		logger.Error("enforcer setup failed", "enforcer", cfg.enforcerKind, "err", err)
 		os.Exit(1)
 	}
+	logger.Info("enforcer ready", "kind", cfg.enforcerKind)
 
 	cli := control.New(cfg.serverGRPC, cfg.project, cfg.token, cfg.host, version, eng, logger)
 	if err := cli.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {

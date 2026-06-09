@@ -81,24 +81,32 @@ func (e *Engine) Setup(ctx context.Context) error {
 	return nil
 }
 
-// Apply adds one set element (src . dst . port) tagged with ruleID, with TTL.
-func (e *Engine) Apply(ctx context.Context, ruleID, src, dst string, port uint32, ttl time.Duration) error {
-	if src == "" || dst == "" || port == 0 {
-		return fmt.Errorf("apply: empty src/dst/port")
+// Apply implements enforcer.Enforcer: it expands srcIPs into one set element
+// (src . dst . port) each, tagged with ruleID and a TTL. Kernel forwarding
+// routes the asset IP through the Agent, so forwardAddr is "" (the Server dials
+// the asset IP directly).
+func (e *Engine) Apply(ctx context.Context, ruleID string, srcIPs []string, dst string, port uint32, ttl time.Duration) (string, error) {
+	if len(srcIPs) == 0 || dst == "" || port == 0 {
+		return "", fmt.Errorf("apply: empty src/dst/port")
 	}
-	key := fmt.Sprintf("%s . %s . %d", src, dst, port)
 	secs := int(ttl.Seconds())
 	if secs < 1 {
 		secs = 1
 	}
-	elem := fmt.Sprintf("{ %s timeout %ds comment \"%s\" }", key, secs, ruleID)
-	if _, err := run(ctx, "", "add", "element", "inet", "yusui", "allowed_v4", elem); err != nil {
-		return err
+	for _, src := range srcIPs {
+		if src == "" {
+			continue
+		}
+		key := fmt.Sprintf("%s . %s . %d", src, dst, port)
+		elem := fmt.Sprintf("{ %s timeout %ds comment \"%s\" }", key, secs, ruleID)
+		if _, err := run(ctx, "", "add", "element", "inet", "yusui", "allowed_v4", elem); err != nil {
+			return "", err
+		}
+		e.mu.Lock()
+		e.rules[ruleID] = append(e.rules[ruleID], key)
+		e.mu.Unlock()
 	}
-	e.mu.Lock()
-	e.rules[ruleID] = append(e.rules[ruleID], key)
-	e.mu.Unlock()
-	return nil
+	return "", nil
 }
 
 // Revoke removes all elements for ruleID (idempotent).

@@ -100,3 +100,38 @@ jobs:
           name: playwright-report
           path: web/playwright-report/
           if-no-files-found: ignore
+
+  e2e-grpc:
+    # draft10: a REAL yusui-agent (userspace L4 forwarder) in the loop over gRPC,
+    # all on loopback (no NetBird). Guards that Web Shell dials the forwarder and
+    # it relays to the sshd asset with the command filter active.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: grpc forwarder e2e
+        env:
+          PG_EXTERNAL: "1"
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        run: bash scripts/e2e-grpc.sh
+      - name: dump logs on failure
+        if: failure()
+        run: |
+          echo "=== server ==="; cat /tmp/yusui-grpc-srv.log || true
+          echo "=== agent  ==="; cat /tmp/yusui-grpc-agt.log || true
+          echo "=== wstest ==="; cat /tmp/yusui-grpc-wst.out || true

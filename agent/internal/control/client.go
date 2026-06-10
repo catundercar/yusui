@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/catundercar/yusui/agent/internal/enforcer"
+	"github.com/catundercar/yusui/agent/internal/overlay"
 	agentv1 "github.com/catundercar/yusui/proto/yusui/agent/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -24,12 +25,13 @@ type Client struct {
 	hostname      string
 	version       string
 	eng           enforcer.Enforcer
+	ov            overlay.Overlay
 	logger        *slog.Logger
 }
 
 // New constructs the control client.
-func New(serverAddr, projectCode, registerToken, hostname, version string, eng enforcer.Enforcer, logger *slog.Logger) *Client {
-	return &Client{serverAddr: serverAddr, projectCode: projectCode, registerToken: registerToken, hostname: hostname, version: version, eng: eng, logger: logger}
+func New(serverAddr, projectCode, registerToken, hostname, version string, eng enforcer.Enforcer, ov overlay.Overlay, logger *slog.Logger) *Client {
+	return &Client{serverAddr: serverAddr, projectCode: projectCode, registerToken: registerToken, hostname: hostname, version: version, eng: eng, ov: ov, logger: logger}
 }
 
 // Run registers and serves the control stream until ctx is cancelled. It
@@ -90,7 +92,7 @@ func (c *Client) session(ctx context.Context, cli agentv1.AgentControlClient) er
 			case <-t.C:
 				_ = send(&agentv1.AgentToServer{Msg: &agentv1.AgentToServer_Heartbeat{Heartbeat: &agentv1.Heartbeat{
 					Ts: timestamppb.Now(), Status: agentv1.AgentStatus_AGENT_STATUS_READY,
-					ActiveRules: uint64(len(c.eng.ActiveRuleIDs())), NetbirdStatus: "n/a",
+					ActiveRules: uint64(len(c.eng.ActiveRuleIDs())), NetbirdStatus: c.ov.Status(),
 				}}})
 			}
 		}

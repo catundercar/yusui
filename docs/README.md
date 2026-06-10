@@ -14,6 +14,7 @@
 | 08 | [JumpServer 集成](08-jumpserver-integration.md) | v0.2 怎么接？部署拓扑？工单 → 授权映射？录像聚合？降级？ |
 | 09 | [Web Shell](09-web-shell.md) | v0.1 默认入口：服务端 SSH 代理、AI attach、危险命令拦截 |
 | 10 | [TODO / 未实现项](10-todo.md) | 还有什么没做？已设计/规划但未落地(或简化)的实现欠账单一事实表 |
+| 11 | [Agent 注册 / daemon 与客户端](11-agent-enrollment.md) | daemon 形态？自动注册 + 人工审核？setup key 下发？CLI/GUI 客户端？ |
 
 ## 阅读顺序建议
 

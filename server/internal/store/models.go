@@ -22,6 +22,8 @@ type YusuiAgent struct {
 	Status          string             `json:"status"`
 	LastSeenAt      pgtype.Timestamptz `json:"last_seen_at"`
 	RegisteredAt    pgtype.Timestamptz `json:"registered_at"`
+	Enrollment      string             `json:"enrollment"`
+	NetbirdSetupKey *string            `json:"netbird_setup_key"`
 }
 
 type YusuiAsset struct {

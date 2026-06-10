@@ -9,10 +9,45 @@ import (
 	"context"
 )
 
+const approveAgent = `-- name: ApproveAgent :one
+UPDATE yusui.agents
+SET enrollment = 'approved', netbird_setup_key = $2
+WHERE id = $1
+RETURNING id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at, enrollment, netbird_setup_key
+`
+
+type ApproveAgentParams struct {
+	ID              int64   `json:"id"`
+	NetbirdSetupKey *string `json:"netbird_setup_key"`
+}
+
+// Admin approval: flip to approved and bind the NetBird setup key (P2 fills it;
+// P1 may pass NULL). Idempotent on an already-approved row.
+func (q *Queries) ApproveAgent(ctx context.Context, arg ApproveAgentParams) (YusuiAgent, error) {
+	row := q.db.QueryRow(ctx, approveAgent, arg.ID, arg.NetbirdSetupKey)
+	var i YusuiAgent
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Role,
+		&i.Hostname,
+		&i.NetbirdPeerID,
+		&i.NetbirdRouteID,
+		&i.AgentVersion,
+		&i.CertFingerprint,
+		&i.Status,
+		&i.LastSeenAt,
+		&i.RegisteredAt,
+		&i.Enrollment,
+		&i.NetbirdSetupKey,
+	)
+	return i, err
+}
+
 const createAgent = `-- name: CreateAgent :one
 INSERT INTO yusui.agents (project_id, role, hostname)
 VALUES ($1, $2, $3)
-RETURNING id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at
+RETURNING id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at, enrollment, netbird_setup_key
 `
 
 type CreateAgentParams struct {
@@ -21,6 +56,7 @@ type CreateAgentParams struct {
 	Hostname  string `json:"hostname"`
 }
 
+// Admin-created agent; enrollment defaults to 'approved' (trusted, docs/11 §11.2).
 func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (YusuiAgent, error) {
 	row := q.db.QueryRow(ctx, createAgent, arg.ProjectID, arg.Role, arg.Hostname)
 	var i YusuiAgent
@@ -36,12 +72,48 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Yusui
 		&i.Status,
 		&i.LastSeenAt,
 		&i.RegisteredAt,
+		&i.Enrollment,
+		&i.NetbirdSetupKey,
+	)
+	return i, err
+}
+
+const createPendingAgent = `-- name: CreatePendingAgent :one
+INSERT INTO yusui.agents (project_id, role, hostname, enrollment)
+VALUES ($1, $2, $3, 'pending')
+RETURNING id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at, enrollment, netbird_setup_key
+`
+
+type CreatePendingAgentParams struct {
+	ProjectID int64  `json:"project_id"`
+	Role      string `json:"role"`
+	Hostname  string `json:"hostname"`
+}
+
+// Auto-registered (unknown) agent; explicitly 'pending' until admin approval.
+func (q *Queries) CreatePendingAgent(ctx context.Context, arg CreatePendingAgentParams) (YusuiAgent, error) {
+	row := q.db.QueryRow(ctx, createPendingAgent, arg.ProjectID, arg.Role, arg.Hostname)
+	var i YusuiAgent
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Role,
+		&i.Hostname,
+		&i.NetbirdPeerID,
+		&i.NetbirdRouteID,
+		&i.AgentVersion,
+		&i.CertFingerprint,
+		&i.Status,
+		&i.LastSeenAt,
+		&i.RegisteredAt,
+		&i.Enrollment,
+		&i.NetbirdSetupKey,
 	)
 	return i, err
 }
 
 const getAgentByID = `-- name: GetAgentByID :one
-SELECT id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at FROM yusui.agents WHERE id = $1
+SELECT id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at, enrollment, netbird_setup_key FROM yusui.agents WHERE id = $1
 `
 
 func (q *Queries) GetAgentByID(ctx context.Context, id int64) (YusuiAgent, error) {
@@ -59,14 +131,49 @@ func (q *Queries) GetAgentByID(ctx context.Context, id int64) (YusuiAgent, error
 		&i.Status,
 		&i.LastSeenAt,
 		&i.RegisteredAt,
+		&i.Enrollment,
+		&i.NetbirdSetupKey,
+	)
+	return i, err
+}
+
+const getAgentByProjectAndHostname = `-- name: GetAgentByProjectAndHostname :one
+SELECT id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at, enrollment, netbird_setup_key FROM yusui.agents WHERE project_id = $1 AND hostname = $2
+`
+
+type GetAgentByProjectAndHostnameParams struct {
+	ProjectID int64  `json:"project_id"`
+	Hostname  string `json:"hostname"`
+}
+
+// Register lookup: find this daemon's row regardless of enrollment state.
+func (q *Queries) GetAgentByProjectAndHostname(ctx context.Context, arg GetAgentByProjectAndHostnameParams) (YusuiAgent, error) {
+	row := q.db.QueryRow(ctx, getAgentByProjectAndHostname, arg.ProjectID, arg.Hostname)
+	var i YusuiAgent
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Role,
+		&i.Hostname,
+		&i.NetbirdPeerID,
+		&i.NetbirdRouteID,
+		&i.AgentVersion,
+		&i.CertFingerprint,
+		&i.Status,
+		&i.LastSeenAt,
+		&i.RegisteredAt,
+		&i.Enrollment,
+		&i.NetbirdSetupKey,
 	)
 	return i, err
 }
 
 const getPrimaryAgentForProject = `-- name: GetPrimaryAgentForProject :one
-SELECT id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at FROM yusui.agents WHERE project_id = $1 AND role = 'primary'
+SELECT id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at, enrollment, netbird_setup_key FROM yusui.agents WHERE project_id = $1 AND role = 'primary' AND enrollment = 'approved'
 `
 
+// Used by the Policy Engine to pick the rule target: only an APPROVED primary
+// ever receives per-ticket rules (pending/rejected agents get nothing, docs/11).
 func (q *Queries) GetPrimaryAgentForProject(ctx context.Context, projectID int64) (YusuiAgent, error) {
 	row := q.db.QueryRow(ctx, getPrimaryAgentForProject, projectID)
 	var i YusuiAgent
@@ -82,12 +189,14 @@ func (q *Queries) GetPrimaryAgentForProject(ctx context.Context, projectID int64
 		&i.Status,
 		&i.LastSeenAt,
 		&i.RegisteredAt,
+		&i.Enrollment,
+		&i.NetbirdSetupKey,
 	)
 	return i, err
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at FROM yusui.agents ORDER BY id
+SELECT id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at, enrollment, netbird_setup_key FROM yusui.agents ORDER BY id
 `
 
 func (q *Queries) ListAgents(ctx context.Context) ([]YusuiAgent, error) {
@@ -111,6 +220,8 @@ func (q *Queries) ListAgents(ctx context.Context) ([]YusuiAgent, error) {
 			&i.Status,
 			&i.LastSeenAt,
 			&i.RegisteredAt,
+			&i.Enrollment,
+			&i.NetbirdSetupKey,
 		); err != nil {
 			return nil, err
 		}
@@ -123,7 +234,7 @@ func (q *Queries) ListAgents(ctx context.Context) ([]YusuiAgent, error) {
 }
 
 const listAgentsByProject = `-- name: ListAgentsByProject :many
-SELECT id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at FROM yusui.agents WHERE project_id = $1 ORDER BY id
+SELECT id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at, enrollment, netbird_setup_key FROM yusui.agents WHERE project_id = $1 ORDER BY id
 `
 
 func (q *Queries) ListAgentsByProject(ctx context.Context, projectID int64) ([]YusuiAgent, error) {
@@ -147,6 +258,8 @@ func (q *Queries) ListAgentsByProject(ctx context.Context, projectID int64) ([]Y
 			&i.Status,
 			&i.LastSeenAt,
 			&i.RegisteredAt,
+			&i.Enrollment,
+			&i.NetbirdSetupKey,
 		); err != nil {
 			return nil, err
 		}
@@ -156,6 +269,31 @@ func (q *Queries) ListAgentsByProject(ctx context.Context, projectID int64) ([]Y
 		return nil, err
 	}
 	return items, nil
+}
+
+const rejectAgent = `-- name: RejectAgent :one
+UPDATE yusui.agents SET enrollment = 'rejected' WHERE id = $1 RETURNING id, project_id, role, hostname, netbird_peer_id, netbird_route_id, agent_version, cert_fingerprint, status, last_seen_at, registered_at, enrollment, netbird_setup_key
+`
+
+func (q *Queries) RejectAgent(ctx context.Context, id int64) (YusuiAgent, error) {
+	row := q.db.QueryRow(ctx, rejectAgent, id)
+	var i YusuiAgent
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.Role,
+		&i.Hostname,
+		&i.NetbirdPeerID,
+		&i.NetbirdRouteID,
+		&i.AgentVersion,
+		&i.CertFingerprint,
+		&i.Status,
+		&i.LastSeenAt,
+		&i.RegisteredAt,
+		&i.Enrollment,
+		&i.NetbirdSetupKey,
+	)
+	return i, err
 }
 
 const setAgentStatus = `-- name: SetAgentStatus :exec

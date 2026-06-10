@@ -64,7 +64,22 @@ func (c *Client) session(ctx context.Context, cli agentv1.AgentControlClient) er
 	if err != nil {
 		return err
 	}
-	c.logger.Info("registered", "agent_id", reg.AgentId)
+	c.logger.Info("registered", "agent_id", reg.AgentId, "enrollment", reg.Enrollment)
+
+	// draft12 enrollment gate (docs/11 §11.2): until an admin approves this
+	// agent, the Server issues no per-ticket rules. Rather than hold an idle
+	// stream, poll Register on an interval so we pick up approval (and, later,
+	// the netbird_setup_key). Empty enrollment = N-1 server without the field —
+	// proceed as before. Returning nil re-enters Register on the next Run loop.
+	if reg.Enrollment != "" && reg.Enrollment != "approved" {
+		c.logger.Warn("agent not approved; awaiting admin approval", "enrollment", reg.Enrollment)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(10 * time.Second):
+		}
+		return nil
+	}
 
 	streamCtx := metadata.AppendToOutgoingContext(ctx, "session-token", reg.SessionToken)
 	stream, err := cli.Control(streamCtx)

@@ -324,14 +324,20 @@ func (x *RegisterRequest) GetCsr() []byte {
 }
 
 type RegisterResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	SignedCert    []byte                 `protobuf:"bytes,2,opt,name=signed_cert,json=signedCert,proto3" json:"signed_cert,omitempty"` // Server CA-signed cert (90d)
-	CaCert        []byte                 `protobuf:"bytes,3,opt,name=ca_cert,json=caCert,proto3" json:"ca_cert,omitempty"`
-	SessionToken  string                 `protobuf:"bytes,4,opt,name=session_token,json=sessionToken,proto3" json:"session_token,omitempty"`
-	Config        *ControlConfig         `protobuf:"bytes,5,opt,name=config,proto3" json:"config,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	AgentId      string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	SignedCert   []byte                 `protobuf:"bytes,2,opt,name=signed_cert,json=signedCert,proto3" json:"signed_cert,omitempty"` // Server CA-signed cert (90d)
+	CaCert       []byte                 `protobuf:"bytes,3,opt,name=ca_cert,json=caCert,proto3" json:"ca_cert,omitempty"`
+	SessionToken string                 `protobuf:"bytes,4,opt,name=session_token,json=sessionToken,proto3" json:"session_token,omitempty"`
+	Config       *ControlConfig         `protobuf:"bytes,5,opt,name=config,proto3" json:"config,omitempty"`
+	// draft12: enrollment gate (docs/11). "pending" = auto-registered, awaiting
+	// admin approval — the Agent gets a session token to maintain a heartbeat-only
+	// stream but receives NO per-ticket rules until "approved". netbird_setup_key
+	// is non-empty only once approved (P2 binds it; the daemon uses it to join).
+	Enrollment      string `protobuf:"bytes,6,opt,name=enrollment,proto3" json:"enrollment,omitempty"`                                    // "pending" | "approved" | "rejected"
+	NetbirdSetupKey string `protobuf:"bytes,7,opt,name=netbird_setup_key,json=netbirdSetupKey,proto3" json:"netbird_setup_key,omitempty"` // non-empty only when approved
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *RegisterResponse) Reset() {
@@ -397,6 +403,20 @@ func (x *RegisterResponse) GetConfig() *ControlConfig {
 		return x.Config
 	}
 	return nil
+}
+
+func (x *RegisterResponse) GetEnrollment() string {
+	if x != nil {
+		return x.Enrollment
+	}
+	return ""
+}
+
+func (x *RegisterResponse) GetNetbirdSetupKey() string {
+	if x != nil {
+		return x.NetbirdSetupKey
+	}
+	return ""
 }
 
 type ControlConfig struct {
@@ -1421,14 +1441,18 @@ const file_yusui_agent_v1_agent_proto_rawDesc = "" +
 	"\bhostname\x18\x03 \x01(\tR\bhostname\x12#\n" +
 	"\ragent_version\x18\x04 \x01(\tR\fagentVersion\x12%\n" +
 	"\x0eregister_token\x18\x05 \x01(\tR\rregisterToken\x12\x10\n" +
-	"\x03csr\x18\x06 \x01(\fR\x03csr\"\xc3\x01\n" +
+	"\x03csr\x18\x06 \x01(\fR\x03csr\"\x8f\x02\n" +
 	"\x10RegisterResponse\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1f\n" +
 	"\vsigned_cert\x18\x02 \x01(\fR\n" +
 	"signedCert\x12\x17\n" +
 	"\aca_cert\x18\x03 \x01(\fR\x06caCert\x12#\n" +
 	"\rsession_token\x18\x04 \x01(\tR\fsessionToken\x125\n" +
-	"\x06config\x18\x05 \x01(\v2\x1d.yusui.agent.v1.ControlConfigR\x06config\"\x94\x01\n" +
+	"\x06config\x18\x05 \x01(\v2\x1d.yusui.agent.v1.ControlConfigR\x06config\x12\x1e\n" +
+	"\n" +
+	"enrollment\x18\x06 \x01(\tR\n" +
+	"enrollment\x12*\n" +
+	"\x11netbird_setup_key\x18\a \x01(\tR\x0fnetbirdSetupKey\"\x94\x01\n" +
 	"\rControlConfig\x12#\n" +
 	"\rheartbeat_sec\x18\x01 \x01(\rR\fheartbeatSec\x12(\n" +
 	"\x10freeze_after_sec\x18\x02 \x01(\rR\x0efreezeAfterSec\x124\n" +

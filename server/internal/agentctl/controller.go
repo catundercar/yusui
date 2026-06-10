@@ -65,30 +65,75 @@ func New(db *store.DB, logger *slog.Logger, regToken string) *Controller {
 
 var _ agentgw.Gateway = (*Controller)(nil)
 
-// Register resolves the registering agent to its DB row (by project code +
-// primary role) and issues a session token for the Control stream.
+// Register resolves the registering agent to its DB row by (project, hostname)
+// and issues a session token. An unknown agent is AUTO-CREATED as a `pending`
+// row (docs/11 §11.2): the daemon may connect a heartbeat-only stream, but the
+// Policy Engine targets only an approved primary (GetPrimaryAgentForProject), so
+// a pending agent receives no per-ticket rules until an admin approves it. Role
+// is assigned by the Server, never chosen by the daemon.
 func (c *Controller) Register(ctx context.Context, req *agentv1.RegisterRequest) (*agentv1.RegisterResponse, error) {
 	if c.regToken != "" && req.RegisterToken != c.regToken {
 		return nil, status.Error(codes.Unauthenticated, "invalid register token")
+	}
+	if req.Hostname == "" {
+		return nil, status.Error(codes.InvalidArgument, "hostname is required")
 	}
 	proj, err := c.db.GetProjectByCode(ctx, req.ProjectCode)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "project %q not found", req.ProjectCode)
 	}
-	agent, err := c.db.GetPrimaryAgentForProject(ctx, proj.ID)
+	agent, err := c.db.GetAgentByProjectAndHostname(ctx, store.GetAgentByProjectAndHostnameParams{ProjectID: proj.ID, Hostname: req.Hostname})
 	if err != nil {
-		return nil, status.Errorf(codes.NotFound, "no primary agent for project %q", req.ProjectCode)
+		role, rerr := c.pickRole(ctx, proj.ID)
+		if rerr != nil {
+			return nil, rerr
+		}
+		agent, err = c.db.CreatePendingAgent(ctx, store.CreatePendingAgentParams{ProjectID: proj.ID, Role: role, Hostname: req.Hostname})
+		if err != nil {
+			// Likely UNIQUE(project_id, role) lost a race with a concurrent
+			// auto-register; the daemon retries Register and re-picks a role.
+			return nil, status.Errorf(codes.Aborted, "create pending agent: %v", err)
+		}
+		c.logger.Info("agent auto-registered (pending)", "agent_id", agent.ID, "project", req.ProjectCode, "hostname", req.Hostname, "role", role)
 	}
 	tok := ulid.Make().String()
 	c.mu.Lock()
 	c.tokens[tok] = agent.ID
 	c.mu.Unlock()
-	c.logger.Info("agent registered", "agent_id", agent.ID, "project", req.ProjectCode, "hostname", req.Hostname, "version", req.AgentVersion)
+	setupKey := ""
+	if agent.Enrollment == "approved" && agent.NetbirdSetupKey != nil {
+		setupKey = *agent.NetbirdSetupKey
+	}
+	c.logger.Info("agent register", "agent_id", agent.ID, "project", req.ProjectCode, "hostname", req.Hostname, "enrollment", agent.Enrollment, "version", req.AgentVersion)
 	return &agentv1.RegisterResponse{
-		AgentId:      strconv.FormatInt(agent.ID, 10),
-		SessionToken: tok,
-		Config:       &agentv1.ControlConfig{HeartbeatSec: 10, FreezeAfterSec: 60, ReconcileIntervalSec: 300},
+		AgentId:         strconv.FormatInt(agent.ID, 10),
+		SessionToken:    tok,
+		Config:          &agentv1.ControlConfig{HeartbeatSec: 10, FreezeAfterSec: 60, ReconcileIntervalSec: 300},
+		Enrollment:      agent.Enrollment,
+		NetbirdSetupKey: setupKey,
 	}, nil
+}
+
+// pickRole assigns the next free agent role for a project: primary, then
+// secondary, then exhausted. UNIQUE(project_id, role) is the real guard against
+// a race; this is the cooperative path.
+func (c *Controller) pickRole(ctx context.Context, projectID int64) (string, error) {
+	existing, err := c.db.ListAgentsByProject(ctx, projectID)
+	if err != nil {
+		return "", status.Errorf(codes.Internal, "list project agents: %v", err)
+	}
+	taken := map[string]bool{}
+	for _, a := range existing {
+		taken[a.Role] = true
+	}
+	switch {
+	case !taken["primary"]:
+		return "primary", nil
+	case !taken["secondary"]:
+		return "secondary", nil
+	default:
+		return "", status.Error(codes.ResourceExhausted, "project agent slots full (primary+secondary)")
+	}
 }
 
 // Control runs the bidirectional stream for one agent.

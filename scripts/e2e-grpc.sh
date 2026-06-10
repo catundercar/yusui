@@ -92,15 +92,28 @@ ADM=$(login admin 'Admin12345!@' | j access_token)
 A=(-H "Authorization: Bearer $ADM" -H 'content-type: application/json')
 curl -fsS "${A[@]}" -X POST $API/api/v1/users -d '{"username":"req1","role":"requester","password":"Req12345!@xy"}' >/dev/null
 curl -fsS "${A[@]}" -X POST $API/api/v1/users -d '{"username":"appr1","role":"approver","password":"Appr12345!@xy"}' >/dev/null
+# Note: NO agent pre-created. draft12 (docs/11): the real daemon auto-registers
+# as a PENDING agent; an admin must approve it before any rule flows.
 PID=$(curl -fsS "${A[@]}" -X POST $API/api/v1/projects -d '{"code":"alpha","name":"Alpha","cidrs":["127.0.0.0/8"]}' | j id)
-curl -fsS "${A[@]}" -X POST $API/api/v1/agents -d "{\"project_id\":$PID,\"role\":\"primary\",\"hostname\":\"alpha-agent\"}" >/dev/null
 AID=$(curl -fsS "${A[@]}" -X POST $API/api/v1/assets -d "{\"project_id\":$PID,\"name\":\"sshd\",\"ip_internal\":\"127.0.0.1\",\"ports\":[2222]}" | j id)
 curl -fsS "${A[@]}" -X POST $API/api/v1/assets/$AID/credentials -d '{"ssh_user":"ops-yusui","auth_kind":"password","secret":"hunter2"}' >/dev/null
 
-echo "== real agent (YUSUI_ENFORCER=forward) =="
-YUSUI_SERVER_GRPC="$GRPC" YUSUI_PROJECT=alpha YUSUI_REGISTER_TOKEN="$REGTOK" YUSUI_ENFORCER=forward YUSUI_LISTEN_HOST=127.0.0.1 \
+echo "== real agent auto-registers (YUSUI_ENFORCER=forward) =="
+YUSUI_SERVER_GRPC="$GRPC" YUSUI_PROJECT=alpha YUSUI_REGISTER_TOKEN="$REGTOK" YUSUI_HOSTNAME=alpha-agent \
+  YUSUI_ENFORCER=forward YUSUI_LISTEN_HOST=127.0.0.1 \
   "$AGT" >"$AGTLOG" 2>&1 &
 AGTPID=$!
+# It registers as pending and waits for approval (no control stream yet).
+for _ in $(seq 1 30); do grep -qi 'awaiting admin approval' "$AGTLOG" 2>/dev/null && break; sleep 1; done
+
+echo "== admin approves the pending agent =="
+agent_field() { curl -fsS "${A[@]}" $API/api/v1/agents | python3 -c 'import sys,json;a=json.load(sys.stdin);print(a[0][sys.argv[1]] if a else "")' "$1"; }
+ENR_BEFORE=$(agent_field enrollment)
+AGID=$(agent_field id)
+echo "discovered agent id=$AGID enrollment=$ENR_BEFORE"
+ENR_AFTER=$(curl -fsS "${A[@]}" -X POST $API/api/v1/agents/$AGID/approve | j enrollment)
+echo "after approve enrollment=$ENR_AFTER"
+# Now the daemon re-registers, sees approved, and opens the control stream.
 for _ in $(seq 1 30); do grep -q 'control stream open' "$AGTLOG" 2>/dev/null && break; sleep 1; done
 
 echo "== ticket =="
@@ -117,6 +130,8 @@ cat "$WSTOUT"
 echo "===== ASSERTIONS ====="
 pass=1
 check() { if eval "$2"; then echo "  PASS: $1"; else echo "  FAIL: $1"; pass=0; fi; }
+check "agent auto-registered as pending"             "[ '$ENR_BEFORE' = pending ]"
+check "admin approval flipped it to approved"        "[ '$ENR_AFTER' = approved ]"
 check "agent opened a forwarder listener"            "grep -qi 'forwarder up' '$AGTLOG'"
 check "server dialed the asset via the forwarder"    "grep -qi 'dialing asset via agent forwarder' '$SRVLOG'"
 check "ticket went active"                           "[ '$ST' = active ]"

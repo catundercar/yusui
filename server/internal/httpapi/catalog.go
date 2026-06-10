@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/catundercar/yusui/server/internal/auth"
 	"github.com/catundercar/yusui/server/internal/services"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -110,6 +112,50 @@ func (h *CatalogHandler) listAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, orEmpty(as))
+}
+
+// approveAgent / rejectAgent flip an auto-registered agent's enrollment gate
+// (docs/11 §11.2). Admin-only + step-up, audited in one tx by the service.
+func (h *CatalogHandler) approveAgent(w http.ResponseWriter, r *http.Request) {
+	id, ok := idParam(r)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	var req struct {
+		SetupKey string `json:"setup_key"` // optional; P2 sources/generates it
+	}
+	_ = decodeJSON(r, &req) // body optional
+	p, _ := auth.PrincipalFrom(r.Context())
+	a, err := h.cat.ApproveAgent(r.Context(), id, p.Username, req.SetupKey)
+	if err != nil {
+		h.agentActionFail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
+func (h *CatalogHandler) rejectAgent(w http.ResponseWriter, r *http.Request) {
+	id, ok := idParam(r)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "invalid id")
+		return
+	}
+	p, _ := auth.PrincipalFrom(r.Context())
+	a, err := h.cat.RejectAgent(r.Context(), id, p.Username)
+	if err != nil {
+		h.agentActionFail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, a)
+}
+
+func (h *CatalogHandler) agentActionFail(w http.ResponseWriter, err error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeErr(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	h.fail(w, err)
 }
 
 // ---- assets ----

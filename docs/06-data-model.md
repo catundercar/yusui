@@ -78,6 +78,12 @@ CREATE TABLE agents (
   cert_fingerprint  TEXT,
   status            TEXT NOT NULL DEFAULT 'unknown'
                        CHECK (status IN ('unknown','online','offline','degraded','frozen')),
+  -- draft12(迁移 0002,docs/11):准入门控,与运行期 status 正交。
+  -- pending=自动注册待审;approved=可下发规则;rejected=拒绝。
+  -- admin 手建默认 approved(向后兼容);自动注册写 pending。
+  enrollment        TEXT NOT NULL DEFAULT 'approved'
+                       CHECK (enrollment IN ('pending','approved','rejected')),
+  netbird_setup_key TEXT,   -- 审核通过时绑定,下发给 daemon 入网;敏感,API 响应脱敏为 has_setup_key
   last_seen_at      TIMESTAMPTZ,
   registered_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (project_id, role)   -- v0.1 限制：每项目最多一个 primary 一个 secondary

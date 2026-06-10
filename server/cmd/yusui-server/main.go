@@ -102,7 +102,7 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 	if err != nil {
 		return err
 	}
-	catalog := services.NewCatalog(db.Queries, sealer)
+	catalog := services.NewCatalog(db, sealer)
 	catalogH := httpapi.NewCatalogHandler(catalog, logger)
 
 	var gw agentgw.Gateway

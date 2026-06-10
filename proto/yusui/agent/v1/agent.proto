@@ -30,6 +30,12 @@ message RegisterResponse {
   bytes ca_cert = 3;
   string session_token = 4;
   ControlConfig config = 5;
+  // draft12: enrollment gate (docs/11). "pending" = auto-registered, awaiting
+  // admin approval — the Agent gets a session token to maintain a heartbeat-only
+  // stream but receives NO per-ticket rules until "approved". netbird_setup_key
+  // is non-empty only once approved (P2 binds it; the daemon uses it to join).
+  string enrollment = 6;        // "pending" | "approved" | "rejected"
+  string netbird_setup_key = 7; // non-empty only when approved
 }
 
 message ControlConfig {

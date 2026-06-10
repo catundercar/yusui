@@ -81,6 +81,10 @@ func NewRouter(d Deps) http.Handler {
 				r.Use(auth.RequireRole("admin"))
 				r.Post("/projects", d.Catalog.createProject)
 				r.Post("/agents", d.Catalog.createAgent)
+				// Agent enrollment approval is a security boundary (docs/11
+				// §11.2) — admin + step-up, audited.
+				r.With(auth.RequireStepUp(d.StepUpWindow)).Post("/agents/{id}/approve", d.Catalog.approveAgent)
+				r.With(auth.RequireStepUp(d.StepUpWindow)).Post("/agents/{id}/reject", d.Catalog.rejectAgent)
 				r.Post("/assets", d.Catalog.createAsset)
 				r.Post("/assets/{id}/credentials", d.Catalog.createCredential)
 				r.Get("/assets/{id}/credentials", d.Catalog.listCredentials)

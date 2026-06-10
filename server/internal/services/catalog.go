@@ -5,13 +5,16 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
+	"strconv"
 
 	"github.com/catundercar/yusui/server/internal/auth"
 	"github.com/catundercar/yusui/server/internal/secrets"
 	"github.com/catundercar/yusui/server/internal/store"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // ErrValidation marks a caller input error (maps to HTTP 400).
@@ -23,13 +26,16 @@ func invalid(format string, a ...any) error { return ErrValidation{msg: fmt.Spri
 
 // Catalog manages projects, agents, assets and their credentials.
 type Catalog struct {
+	db     *store.DB
 	q      *store.Queries
 	sealer *secrets.Sealer
 }
 
-// NewCatalog constructs the catalog service.
-func NewCatalog(q *store.Queries, sealer *secrets.Sealer) *Catalog {
-	return &Catalog{q: q, sealer: sealer}
+// NewCatalog constructs the catalog service. It takes the full *store.DB so
+// enrollment changes can be written with their audit row in one transaction
+// (invariant #7); plain reads/writes still go through the embedded Queries.
+func NewCatalog(db *store.DB, sealer *secrets.Sealer) *Catalog {
+	return &Catalog{db: db, q: db.Queries, sealer: sealer}
 }
 
 // ---- projects ----
@@ -75,8 +81,95 @@ func (c *Catalog) CreateAgent(ctx context.Context, projectID int64, role, hostna
 	return c.q.CreateAgent(ctx, store.CreateAgentParams{ProjectID: projectID, Role: role, Hostname: hostname})
 }
 
-func (c *Catalog) ListAgents(ctx context.Context) ([]store.YusuiAgent, error) {
-	return c.q.ListAgents(ctx)
+// AgentView is the admin-facing agent shape: identical to the stored row but
+// with the sensitive netbird_setup_key redacted to a boolean (docs/11 §11.7).
+type AgentView struct {
+	ID              int64              `json:"id"`
+	ProjectID       int64              `json:"project_id"`
+	Role            string             `json:"role"`
+	Hostname        string             `json:"hostname"`
+	NetbirdPeerID   *string            `json:"netbird_peer_id"`
+	NetbirdRouteID  *string            `json:"netbird_route_id"`
+	AgentVersion    *string            `json:"agent_version"`
+	CertFingerprint *string            `json:"cert_fingerprint"`
+	Status          string             `json:"status"`
+	LastSeenAt      pgtype.Timestamptz `json:"last_seen_at"`
+	RegisteredAt    pgtype.Timestamptz `json:"registered_at"`
+	Enrollment      string             `json:"enrollment"`
+	HasSetupKey     bool               `json:"has_setup_key"`
+}
+
+func agentView(a store.YusuiAgent) AgentView {
+	return AgentView{
+		ID: a.ID, ProjectID: a.ProjectID, Role: a.Role, Hostname: a.Hostname,
+		NetbirdPeerID: a.NetbirdPeerID, NetbirdRouteID: a.NetbirdRouteID,
+		AgentVersion: a.AgentVersion, CertFingerprint: a.CertFingerprint,
+		Status: a.Status, LastSeenAt: a.LastSeenAt, RegisteredAt: a.RegisteredAt,
+		Enrollment: a.Enrollment, HasSetupKey: a.NetbirdSetupKey != nil,
+	}
+}
+
+func (c *Catalog) ListAgents(ctx context.Context) ([]AgentView, error) {
+	rows, err := c.q.ListAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AgentView, len(rows))
+	for i, a := range rows {
+		out[i] = agentView(a)
+	}
+	return out, nil
+}
+
+// ApproveAgent flips enrollment to approved, optionally binding a NetBird setup
+// key (P2; P1 typically passes ""), and audits it in the same transaction.
+func (c *Catalog) ApproveAgent(ctx context.Context, id int64, actorID, setupKey string) (AgentView, error) {
+	return c.setEnrollment(ctx, id, actorID, "agent.approve", setupKey, true)
+}
+
+// RejectAgent flips enrollment to rejected and audits it in the same transaction.
+func (c *Catalog) RejectAgent(ctx context.Context, id int64, actorID string) (AgentView, error) {
+	return c.setEnrollment(ctx, id, actorID, "agent.reject", "", false)
+}
+
+func (c *Catalog) setEnrollment(ctx context.Context, id int64, actorID, action, setupKey string, approve bool) (AgentView, error) {
+	tx, err := c.db.Pool.Begin(ctx)
+	if err != nil {
+		return AgentView{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := c.db.WithTx(tx)
+
+	var a store.YusuiAgent
+	if approve {
+		var key *string
+		if setupKey != "" {
+			key = &setupKey
+		}
+		a, err = q.ApproveAgent(ctx, store.ApproveAgentParams{ID: id, NetbirdSetupKey: key})
+	} else {
+		a, err = q.RejectAgent(ctx, id)
+	}
+	if err != nil {
+		return AgentView{}, err
+	}
+
+	aid := actorID
+	tt := "agent"
+	tid := strconv.FormatInt(id, 10)
+	payload, _ := json.Marshal(map[string]any{
+		"hostname": a.Hostname, "project_id": a.ProjectID, "role": a.Role, "enrollment": a.Enrollment,
+	})
+	if err := q.InsertAudit(ctx, store.InsertAuditParams{
+		ActorType: "user", ActorID: &aid, Action: action,
+		TargetType: &tt, TargetID: &tid, Payload: payload,
+	}); err != nil {
+		return AgentView{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return AgentView{}, err
+	}
+	return agentView(a), nil
 }
 
 // ---- assets ----

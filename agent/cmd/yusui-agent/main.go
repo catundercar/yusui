@@ -23,6 +23,7 @@ import (
 	"github.com/catundercar/yusui/agent/internal/enforcer"
 	"github.com/catundercar/yusui/agent/internal/forward"
 	"github.com/catundercar/yusui/agent/internal/nft"
+	"github.com/catundercar/yusui/agent/internal/overlay"
 )
 
 var version = "0.1.0-m3"
@@ -32,7 +33,7 @@ func main() {
 	hostname, _ := os.Hostname()
 
 	cfg := struct {
-		serverGRPC, project, token, host, iface, enforcerKind, listenHost string
+		serverGRPC, project, token, host, iface, enforcerKind, listenHost, overlayKind string
 	}{
 		serverGRPC:   getenv("YUSUI_SERVER_GRPC", "localhost:9090"),
 		project:      os.Getenv("YUSUI_PROJECT"),
@@ -41,6 +42,7 @@ func main() {
 		iface:        os.Getenv("YUSUI_EGRESS_IFACE"),
 		enforcerKind: getenv("YUSUI_ENFORCER", "forward"),
 		listenHost:   os.Getenv("YUSUI_LISTEN_HOST"),
+		overlayKind:  getenv("YUSUI_OVERLAY", "static"),
 	}
 	if cfg.project == "" {
 		logger.Error("YUSUI_PROJECT is required")
@@ -51,12 +53,23 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	ov, err := overlay.New(cfg.overlayKind, cfg.listenHost)
+	if err != nil {
+		logger.Error("overlay init failed", "err", err)
+		os.Exit(1)
+	}
+	if err := ov.EnsureUp(ctx); err != nil {
+		logger.Error("overlay up failed", "err", err)
+		os.Exit(1)
+	}
+	logger.Info("overlay ready", "kind", cfg.overlayKind, "listen_host", ov.ListenHost(), "status", ov.Status())
+
 	var eng enforcer.Enforcer
 	switch cfg.enforcerKind {
 	case "nft":
 		eng = nft.New(cfg.iface, logger) // optional Linux kernel engine (needs CAP_NET_ADMIN + nft)
 	default:
-		eng = forward.New(cfg.listenHost, logger) // draft10 default: cross-platform userspace L4 forwarder
+		eng = forward.New(ov.ListenHost(), logger) // draft10 default: cross-platform userspace L4 forwarder
 	}
 	if err := eng.Setup(ctx); err != nil {
 		logger.Error("enforcer setup failed", "enforcer", cfg.enforcerKind, "err", err)
@@ -64,7 +77,7 @@ func main() {
 	}
 	logger.Info("enforcer ready", "kind", cfg.enforcerKind)
 
-	cli := control.New(cfg.serverGRPC, cfg.project, cfg.token, cfg.host, version, eng, logger)
+	cli := control.New(cfg.serverGRPC, cfg.project, cfg.token, cfg.host, version, eng, ov, logger)
 	if err := cli.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		logger.Error("agent exited", "err", err)
 		os.Exit(1)

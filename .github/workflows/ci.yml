@@ -30,6 +30,8 @@ jobs:
           if [ -n "$unformatted" ]; then echo "needs gofmt:"; echo "$unformatted"; exit 1; fi
       - name: build
         run: go build github.com/catundercar/yusui/server/... github.com/catundercar/yusui/agent/...
+      - name: windows agent build (draft10 Windows-native agent.exe)
+        run: cd agent && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /tmp/yusui-agent.exe ./cmd/yusui-agent
       - name: test
         run: |
           (cd server && go test ./...)

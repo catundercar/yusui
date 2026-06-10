@@ -52,7 +52,8 @@ type Engine struct {
 
 	// draft10: ticket_id -> Agent forwarder address reported by ApplyRule. This
 	// is ephemeral runtime state (a fresh listen port each Apply), so it lives in
-	// memory, not the DB; reconcile re-Applies and repopulates after a restart.
+	// memory, not the DB. NOTE: it is NOT yet rebuilt after a server restart
+	// (no startup re-Apply) — tracked in docs/10 (forward_addr durability).
 	fwdMu    sync.Mutex
 	forwards map[int64]string
 }

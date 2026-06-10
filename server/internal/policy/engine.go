@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/catundercar/yusui/server/internal/agentgw"
@@ -48,6 +49,12 @@ type Engine struct {
 	logger     *slog.Logger
 	srcPeerIPs []string
 	closer     SessionCloser
+
+	// draft10: ticket_id -> Agent forwarder address reported by ApplyRule. This
+	// is ephemeral runtime state (a fresh listen port each Apply), so it lives in
+	// memory, not the DB; reconcile re-Applies and repopulates after a restart.
+	fwdMu    sync.Mutex
+	forwards map[int64]string
 }
 
 // SessionCloser force-closes a ticket's live Web Shell sessions on revoke.
@@ -58,7 +65,26 @@ type SessionCloser interface {
 // NewEngine constructs the Policy Engine. srcPeerIPs is the Server's overlay
 // IP(s) used as the ACL source (empty until NetBird lands in M4).
 func NewEngine(db *store.DB, gw agentgw.Gateway, logger *slog.Logger, srcPeerIPs []string) *Engine {
-	return &Engine{db: db, gw: gw, logger: logger, srcPeerIPs: srcPeerIPs}
+	return &Engine{db: db, gw: gw, logger: logger, srcPeerIPs: srcPeerIPs, forwards: map[int64]string{}}
+}
+
+// ResolveForward returns the Agent forwarder address for a ticket, or "" if the
+// asset should be dialled directly (mock gateway / kernel nft enforcer). Web
+// Shell consults this when opening a session (draft10).
+func (e *Engine) ResolveForward(ticketID int64) string {
+	e.fwdMu.Lock()
+	defer e.fwdMu.Unlock()
+	return e.forwards[ticketID]
+}
+
+func (e *Engine) setForward(ticketID int64, addr string) {
+	e.fwdMu.Lock()
+	defer e.fwdMu.Unlock()
+	if addr == "" {
+		delete(e.forwards, ticketID)
+		return
+	}
+	e.forwards[ticketID] = addr
 }
 
 // SetSessionCloser wires the Web Shell manager (set after construction to avoid
@@ -214,9 +240,10 @@ func (e *Engine) Apply(ctx context.Context, ticketID int64, actor Actor) error {
 	rid := ruleID(t)
 	expires := time.Now().Add(time.Duration(t.DurationSec) * time.Second)
 
-	if err := e.gw.ApplyRule(ctx, agentgw.ApplyInput{
+	fwd, err := e.gw.ApplyRule(ctx, agentgw.ApplyInput{
 		RuleID: rid, AgentID: agent.ID, SrcPeerIPs: e.srcPeerIPs, Targets: targets, ExpiresAt: expires,
-	}); err != nil {
+	})
+	if err != nil {
 		_, _ = e.transition(ctx, ticketID, "approved", "policy.apply_failed", actor,
 			map[string]any{"error": err.Error()},
 			func(ctx context.Context, q *store.Queries, t store.YusuiTicket) error {
@@ -224,6 +251,7 @@ func (e *Engine) Apply(ctx context.Context, ticketID int64, actor Actor) error {
 			})
 		return fmt.Errorf("apply rule on agent %d: %w", agent.ID, err)
 	}
+	e.setForward(ticketID, fwd) // draft10: Web Shell dials this (if non-empty) instead of the asset IP
 
 	_, err = e.transition(ctx, ticketID, "approved", "policy.apply", actor,
 		map[string]any{"agent_id": agent.ID, "rule_id": rid, "targets": len(targets), "expires_at": expires},
@@ -266,6 +294,7 @@ func (e *Engine) Revoke(ctx context.Context, ticketID int64, reason string, acto
 			return fmt.Errorf("revoke rule: %w", err)
 		}
 	}
+	e.setForward(ticketID, "") // draft10: drop the ephemeral forwarder address
 	_, err = e.transition(ctx, ticketID, "revoking", "policy.revoke", actor, map[string]any{"reason": reason},
 		func(ctx context.Context, q *store.Queries, t store.YusuiTicket) error {
 			return q.CloseTicket(ctx, store.CloseTicketParams{ID: t.ID, Status: "closed"})

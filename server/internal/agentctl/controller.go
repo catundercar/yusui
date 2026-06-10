@@ -180,12 +180,14 @@ func (c *Controller) connFor(agentID int64) *agentConn {
 
 // ---- agentgw.Gateway ----
 
-// ApplyRule sends one ApplyRule per (target × src) sharing the rule_id, awaiting
-// each ack. The Agent expands them into nft set elements tagged with rule_id.
-func (c *Controller) ApplyRule(ctx context.Context, in agentgw.ApplyInput) error {
+// ApplyRule sends one ApplyRule per target (carrying all src_peer_ips) sharing
+// the rule_id, awaiting each ack. It returns the first target's forwarder
+// address (draft10: the Agent opens one userspace listener per target and
+// reports its overlay address via AckCommand.forward_addr).
+func (c *Controller) ApplyRule(ctx context.Context, in agentgw.ApplyInput) (string, error) {
 	conn := c.connFor(in.AgentID)
 	if conn == nil {
-		return fmt.Errorf("agent %d not connected", in.AgentID)
+		return "", fmt.Errorf("agent %d not connected", in.AgentID)
 	}
 	srcs := in.SrcPeerIPs
 	if len(srcs) == 0 {
@@ -195,17 +197,22 @@ func (c *Controller) ApplyRule(ctx context.Context, in agentgw.ApplyInput) error
 	if !in.ExpiresAt.IsZero() {
 		exp = timestamppb.New(in.ExpiresAt)
 	}
+	forwardAddr := ""
 	for _, t := range in.Targets {
 		cmdID := ulid.Make().String()
 		msg := &agentv1.ServerToAgent{Msg: &agentv1.ServerToAgent_Apply{Apply: &agentv1.ApplyRule{
 			CommandId: cmdID, RuleId: in.RuleID, SrcPeerIps: srcs,
 			DstIp: t.DstIP, DstPort: uint32(t.DstPort), Proto: protoOf(t.Proto), ExpiresAt: exp,
 		}}}
-		if err := c.roundtrip(ctx, conn, cmdID, msg); err != nil {
-			return err
+		a, err := c.roundtrip(ctx, conn, cmdID, msg)
+		if err != nil {
+			return "", err
+		}
+		if forwardAddr == "" && a.ForwardAddr != "" {
+			forwardAddr = a.ForwardAddr // MVP tickets are single-target
 		}
 	}
-	return nil
+	return forwardAddr, nil
 }
 
 // RevokeRule removes all elements tagged rule_id.
@@ -218,7 +225,8 @@ func (c *Controller) RevokeRule(ctx context.Context, agentID int64, ruleID strin
 	msg := &agentv1.ServerToAgent{Msg: &agentv1.ServerToAgent_Revoke{Revoke: &agentv1.RevokeRule{
 		CommandId: cmdID, RuleId: ruleID, Reason: "revoked",
 	}}}
-	return c.roundtrip(ctx, conn, cmdID, msg)
+	_, err := c.roundtrip(ctx, conn, cmdID, msg)
+	return err
 }
 
 // Reconcile asks the agent for its active rule ids.
@@ -244,26 +252,26 @@ func (c *Controller) Reconcile(ctx context.Context, agentID int64) ([]string, er
 	}
 }
 
-func (c *Controller) roundtrip(ctx context.Context, conn *agentConn, cmdID string, msg *agentv1.ServerToAgent) error {
+func (c *Controller) roundtrip(ctx context.Context, conn *agentConn, cmdID string, msg *agentv1.ServerToAgent) (*agentv1.AckCommand, error) {
 	ack := conn.waitAck(cmdID)
 	defer conn.clearAck(cmdID)
 	select {
 	case conn.send <- msg:
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	case <-time.After(c.cmdTO):
-		return fmt.Errorf("send timeout")
+		return nil, fmt.Errorf("send timeout")
 	}
 	select {
 	case a := <-ack:
 		if a.Result != agentv1.AckResult_ACK_RESULT_OK && a.Result != agentv1.AckResult_ACK_RESULT_SKIPPED {
-			return fmt.Errorf("agent nacked %s: %s", a.Result, a.ErrorMsg)
+			return nil, fmt.Errorf("agent nacked %s: %s", a.Result, a.ErrorMsg)
 		}
-		return nil
+		return a, nil
 	case <-time.After(c.cmdTO):
-		return fmt.Errorf("ack timeout for command %s", cmdID)
+		return nil, fmt.Errorf("ack timeout for command %s", cmdID)
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 }
 

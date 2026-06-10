@@ -118,6 +118,7 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 
 	shellMgr := webshell.NewManager(db, catalog, cfg.RecordingsDir, logger)
 	engine.SetSessionCloser(shellMgr)
+	shellMgr.SetForwardResolver(engine) // draft10: dial the Agent forwarder when present
 	webShellH := httpapi.NewWebShellHandler(shellMgr, engine, mgr, logger)
 
 	var grpcSrv *grpc.Server

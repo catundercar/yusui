@@ -16,6 +16,9 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    # Without a restart policy a Docker-daemon restart leaves postgres down while
+    # server (unless-stopped) comes back and crash-loops on DNS -> nginx 502.
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d yusui"]
       interval: 5s

@@ -1,0 +1,4 @@
+# Rendered by gen-config.sh — host-specific (LAN IP) + contain secrets.
+config.yaml
+dashboard.env
+*.local

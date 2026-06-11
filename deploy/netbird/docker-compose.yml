@@ -1,0 +1,38 @@
+# Local self-hosted NetBird control plane for YuSui integration testing.
+# Combined netbird-server (Management + Signal + Relay + STUN + embedded Dex IdP)
+# on host :8081, dashboard on :8080. Direct, no reverse proxy, http only — for
+# LOCAL DEV ONLY (production NetBird must run behind TLS, docs/04).
+name: yusui-netbird
+
+services:
+  netbird-server:
+    image: netbirdio/netbird-server:latest
+    container_name: yusui-nb-server
+    restart: unless-stopped
+    ports:
+      - "8081:80"        # management + signal + relay + /api + /oauth2 (Dex)
+      - "3478:3478/udp"  # STUN
+    volumes:
+      - nb_data:/var/lib/netbird
+      - ./config.yaml:/etc/netbird/config.yaml:ro
+    command: ["--config", "/etc/netbird/config.yaml"]
+    logging:
+      driver: "json-file"
+      options: { max-size: "100m", max-file: "2" }
+
+  dashboard:
+    image: netbirdio/dashboard:latest
+    container_name: yusui-nb-dashboard
+    restart: unless-stopped
+    ports:
+      - "8090:80"        # 8080 is taken by the YuSui server compose
+    env_file:
+      - ./dashboard.env
+    depends_on:
+      - netbird-server
+    logging:
+      driver: "json-file"
+      options: { max-size: "100m", max-file: "2" }
+
+volumes:
+  nb_data:

@@ -23,8 +23,10 @@ BIN=/tmp/yusui-grpc-srv
 AGT=/tmp/yusui-grpc-agt
 WST=/tmp/yusui-grpc-wst
 SRVLOG=/tmp/yusui-grpc-srv.log
+SRVLOG2=/tmp/yusui-grpc-srv2.log
 AGTLOG=/tmp/yusui-grpc-agt.log
 WSTOUT=/tmp/yusui-grpc-wst.out
+WSTOUT2=/tmp/yusui-grpc-wst2.out
 
 if command -v brew >/dev/null 2>&1; then
   PGBIN="$(brew --prefix postgresql@16 2>/dev/null)/bin"
@@ -79,12 +81,15 @@ rm -rf "$REC"; mkdir -p "$REC"
 DATABASE_URL="postgres://yusui_migrate:migratesecret@$H:$PORT/yusui?sslmode=disable" "$BIN" migrate >/dev/null 2>&1
 
 echo "== server (AGENT_GATEWAY=grpc) =="
-DATABASE_URL="postgres://yusui_app:appsecret@$H:$PORT/yusui?sslmode=disable" HTTP_ADDR=":8089" JWT_SECRET=devsecret \
-  ADMIN_PASSWORD='Admin12345!@' CREDENTIAL_KEY=devkey RECORDINGS_DIR="$REC" \
-  AGENT_GATEWAY=grpc AGENT_GRPC_ADDR="$GRPC" AGENT_REGISTER_TOKEN="$REGTOK" \
-  "$BIN" serve >"$SRVLOG" 2>&1 &
-SRVPID=$!
-for _ in $(seq 1 30); do curl -fsS $API/healthz >/dev/null 2>&1 && break; sleep 1; done
+start_server() { # $1 = logfile; sets SRVPID, waits for healthz
+  DATABASE_URL="postgres://yusui_app:appsecret@$H:$PORT/yusui?sslmode=disable" HTTP_ADDR=":8089" JWT_SECRET=devsecret \
+    ADMIN_PASSWORD='Admin12345!@' CREDENTIAL_KEY=devkey RECORDINGS_DIR="$REC" \
+    AGENT_GATEWAY=grpc AGENT_GRPC_ADDR="$GRPC" AGENT_REGISTER_TOKEN="$REGTOK" \
+    "$BIN" serve >"$1" 2>&1 &
+  SRVPID=$!
+  for _ in $(seq 1 30); do curl -fsS $API/healthz >/dev/null 2>&1 && break; sleep 1; done
+}
+start_server "$SRVLOG"
 
 j() { python3 -c 'import sys,json;print(json.load(sys.stdin)[sys.argv[1]])' "$1"; }
 login() { curl -fsS -X POST $API/api/v1/auth/login -H 'content-type: application/json' -d "{\"username\":\"$1\",\"password\":\"$2\"}"; }
@@ -127,6 +132,23 @@ echo "== drive Web Shell (admin) =="
 "$WST" "ws://127.0.0.1:8089/api/v1/ws/tickets/$TID/terminal?access_token=$ADM" "$ADM" >"$WSTOUT" 2>&1
 cat "$WSTOUT"
 
+# --- forward_addr durability across a Server restart (docs/10) ---
+# The ticket→forward_addr map is in-memory. Kill + restart the Server: the agent
+# reconnects, and the scheduler's RebuildForwards re-Applies the active ticket
+# (idempotent on rule_id) to repopulate the map. Without the rebuild, the second
+# Web Shell would resolve an empty forward_addr and (under a real overlay) fail.
+echo "== restart server (rebuild forward_addr) =="
+kill "$SRVPID" 2>/dev/null
+for _ in $(seq 1 15); do curl -fsS $API/healthz >/dev/null 2>&1 || break; sleep 1; done
+sleep 2  # let the old process release :8089 / gRPC :9091
+start_server "$SRVLOG2"
+# agent reconnects (its stream broke) + a scheduler pass re-Applies the ticket
+for _ in $(seq 1 30); do grep -q 'rebuilt forward address after restart' "$SRVLOG2" 2>/dev/null && break; sleep 1; done
+
+echo "== drive Web Shell again post-restart (same JWT secret → ADM still valid) =="
+"$WST" "ws://127.0.0.1:8089/api/v1/ws/tickets/$TID/terminal?access_token=$ADM" "$ADM" >"$WSTOUT2" 2>&1
+cat "$WSTOUT2"
+
 echo "===== ASSERTIONS ====="
 pass=1
 check() { if eval "$2"; then echo "  PASS: $1"; else echo "  FAIL: $1"; pass=0; fi; }
@@ -137,4 +159,7 @@ check "server dialed the asset via the forwarder"    "grep -qi 'dialing asset vi
 check "ticket went active"                           "[ '$ST' = active ]"
 check "whoami output relayed back through forwarder" "grep -q 'OUTPUT_HAS_USER=true' '$WSTOUT'"
 check "command filter blocked rm -rf / via forwarder" "grep -q 'GOT_BLOCK=true' '$WSTOUT'"
+check "forward_addr rebuilt after server restart"     "grep -q 'rebuilt forward address after restart' '$SRVLOG2'"
+check "post-restart Web Shell dialed the forwarder"   "grep -qi 'dialing asset via agent forwarder' '$SRVLOG2'"
+check "post-restart whoami relayed through forwarder" "grep -q 'OUTPUT_HAS_USER=true' '$WSTOUT2'"
 if [ "$pass" = 1 ]; then echo "GRPC FORWARDER E2E: PASS"; else echo "GRPC FORWARDER E2E: FAIL"; exit 1; fi

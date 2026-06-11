@@ -167,7 +167,18 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 	case <-ctx.Done():
 		logger.Info("shutting down")
 		if grpcSrv != nil {
-			grpcSrv.GracefulStop()
+			// GracefulStop blocks until all RPCs finish — but the Agent holds a
+			// long-lived Control stream that never ends on its own, so an
+			// unbounded GracefulStop would hang every SIGTERM (deploy/restart)
+			// holding the listen ports. Bound it: drain briefly, then force.
+			done := make(chan struct{})
+			go func() { grpcSrv.GracefulStop(); close(done) }()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				logger.Warn("gRPC graceful stop timed out; forcing")
+				grpcSrv.Stop()
+			}
 		}
 		shCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

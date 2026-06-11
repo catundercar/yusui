@@ -174,6 +174,54 @@ func (q *Queries) GetTicketForUpdate(ctx context.Context, id int64) (YusuiTicket
 	return i, err
 }
 
+const listActiveTickets = `-- name: ListActiveTickets :many
+SELECT id, pub_id, requester_id, approver_id, project_id, target_selector, frozen_asset_ids, ports, protocol, access_kind, reason, duration_sec, status, created_at, approved_at, activated_at, expires_at, closed_at, updated_at FROM yusui.tickets
+WHERE status = 'active' AND (expires_at IS NULL OR expires_at > now())
+ORDER BY id
+`
+
+// Not-yet-expired active tickets — used to rebuild the in-memory forward map
+// after a Server restart (docs/10).
+func (q *Queries) ListActiveTickets(ctx context.Context) ([]YusuiTicket, error) {
+	rows, err := q.db.Query(ctx, listActiveTickets)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []YusuiTicket
+	for rows.Next() {
+		var i YusuiTicket
+		if err := rows.Scan(
+			&i.ID,
+			&i.PubID,
+			&i.RequesterID,
+			&i.ApproverID,
+			&i.ProjectID,
+			&i.TargetSelector,
+			&i.FrozenAssetIds,
+			&i.Ports,
+			&i.Protocol,
+			&i.AccessKind,
+			&i.Reason,
+			&i.DurationSec,
+			&i.Status,
+			&i.CreatedAt,
+			&i.ApprovedAt,
+			&i.ActivatedAt,
+			&i.ExpiresAt,
+			&i.ClosedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExpiredActiveTickets = `-- name: ListExpiredActiveTickets :many
 SELECT id, pub_id, requester_id, approver_id, project_id, target_selector, frozen_asset_ids, ports, protocol, access_kind, reason, duration_sec, status, created_at, approved_at, activated_at, expires_at, closed_at, updated_at FROM yusui.tickets
 WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= now()

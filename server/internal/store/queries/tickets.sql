@@ -39,3 +39,10 @@ UPDATE yusui.tickets SET status = $2, closed_at = now(), updated_at = now() WHER
 SELECT * FROM yusui.tickets
 WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at <= now()
 ORDER BY id;
+
+-- name: ListActiveTickets :many
+-- Not-yet-expired active tickets — used to rebuild the in-memory forward map
+-- after a Server restart (docs/10).
+SELECT * FROM yusui.tickets
+WHERE status = 'active' AND (expires_at IS NULL OR expires_at > now())
+ORDER BY id;

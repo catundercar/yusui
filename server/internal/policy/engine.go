@@ -52,8 +52,10 @@ type Engine struct {
 
 	// draft10: ticket_id -> Agent forwarder address reported by ApplyRule. This
 	// is ephemeral runtime state (a fresh listen port each Apply), so it lives in
-	// memory, not the DB. NOTE: it is NOT yet rebuilt after a server restart
-	// (no startup re-Apply) — tracked in docs/10 (forward_addr durability).
+	// memory, not the DB. KEY PRESENCE means "applied in this process": an entry
+	// may legitimately be "" (kernel nft enforcer / mock gateway dial the asset
+	// directly). After a Server restart the map is empty; the scheduler's
+	// RebuildForwards re-Applies active tickets to repopulate it (docs/10).
 	fwdMu    sync.Mutex
 	forwards map[int64]string
 }
@@ -78,14 +80,28 @@ func (e *Engine) ResolveForward(ticketID int64) string {
 	return e.forwards[ticketID]
 }
 
+// setForward records the forwarder address for a ticket. It stores even "" so
+// the key's PRESENCE marks the ticket as applied-this-process (so RebuildForwards
+// skips it); only Revoke removes the entry via clearForward.
 func (e *Engine) setForward(ticketID int64, addr string) {
 	e.fwdMu.Lock()
 	defer e.fwdMu.Unlock()
-	if addr == "" {
-		delete(e.forwards, ticketID)
-		return
-	}
 	e.forwards[ticketID] = addr
+}
+
+func (e *Engine) clearForward(ticketID int64) {
+	e.fwdMu.Lock()
+	defer e.fwdMu.Unlock()
+	delete(e.forwards, ticketID)
+}
+
+// forwardKnown reports whether this process has already applied the ticket (so
+// the rebuild pass can skip it).
+func (e *Engine) forwardKnown(ticketID int64) bool {
+	e.fwdMu.Lock()
+	defer e.fwdMu.Unlock()
+	_, ok := e.forwards[ticketID]
+	return ok
 }
 
 // SetSessionCloser wires the Web Shell manager (set after construction to avoid
@@ -232,12 +248,7 @@ func (e *Engine) Apply(ctx context.Context, ticketID int64, actor Actor) error {
 	if err != nil {
 		return err
 	}
-	var targets []agentgw.Target
-	for _, a := range assets {
-		for _, p := range t.Ports {
-			targets = append(targets, agentgw.Target{DstIP: a.IpInternal.String(), DstPort: p, Proto: t.Protocol})
-		}
-	}
+	targets := buildTargets(assets, t.Ports, t.Protocol)
 	rid := ruleID(t)
 	expires := time.Now().Add(time.Duration(t.DurationSec) * time.Second)
 
@@ -295,7 +306,7 @@ func (e *Engine) Revoke(ctx context.Context, ticketID int64, reason string, acto
 			return fmt.Errorf("revoke rule: %w", err)
 		}
 	}
-	e.setForward(ticketID, "") // draft10: drop the ephemeral forwarder address
+	e.clearForward(ticketID) // draft10: drop the ephemeral forwarder address
 	_, err = e.transition(ctx, ticketID, "revoking", "policy.revoke", actor, map[string]any{"reason": reason},
 		func(ctx context.Context, q *store.Queries, t store.YusuiTicket) error {
 			return q.CloseTicket(ctx, store.CloseTicketParams{ID: t.ID, Status: "closed"})
@@ -320,22 +331,93 @@ func (e *Engine) ExpireDue(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// RunScheduler periodically revokes expired tickets until ctx is cancelled.
+// RebuildForwards re-issues the Agent rule for every active ticket whose
+// forwarder address this process does not yet know, repopulating the in-memory
+// map after a Server restart (the map is not persisted). The Agent's ApplyRule
+// is idempotent on rule_id — it returns the existing forwarder address without
+// disrupting live connections, or re-creates the forwarder if the Agent also
+// restarted. Tickets whose Agent is not currently connected fail and are retried
+// on the next pass; once resolved they are skipped (docs/10). Returns the count
+// resolved this pass.
+func (e *Engine) RebuildForwards(ctx context.Context) (int, error) {
+	active, err := e.db.ListActiveTickets(ctx)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, t := range active {
+		if e.forwardKnown(t.ID) {
+			continue
+		}
+		fwd, err := e.reapply(ctx, t)
+		if err != nil {
+			e.logger.Warn("rebuild forward: re-apply failed, will retry", "ticket", t.PubID, "err", err)
+			continue
+		}
+		e.setForward(t.ID, fwd)
+		e.logger.Info("rebuilt forward address after restart", "ticket", t.PubID, "forward_addr", fwd)
+		n++
+	}
+	return n, nil
+}
+
+// reapply re-issues an active ticket's existing binding to the Agent and returns
+// the forwarder address (idempotent; does not change ticket state or the DB).
+func (e *Engine) reapply(ctx context.Context, t store.YusuiTicket) (string, error) {
+	b, err := e.db.GetBinding(ctx, t.ID)
+	if err != nil {
+		return "", fmt.Errorf("no binding for ticket %d: %w", t.ID, err)
+	}
+	assets, err := e.db.ListAssetsByIDs(ctx, t.FrozenAssetIds)
+	if err != nil {
+		return "", err
+	}
+	return e.gw.ApplyRule(ctx, agentgw.ApplyInput{
+		RuleID: b.AgentRuleID, AgentID: b.AgentID, SrcPeerIPs: e.srcPeerIPs,
+		Targets: buildTargets(assets, t.Ports, t.Protocol), ExpiresAt: t.ExpiresAt.Time,
+	})
+}
+
+// RunScheduler periodically revokes expired tickets and rebuilds forwarder
+// addresses until ctx is cancelled. It runs one pass immediately so a restart
+// repopulates forwards (and expires overdue tickets) without waiting a full
+// interval.
 func (e *Engine) RunScheduler(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
+	e.schedulerPass(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if n, err := e.ExpireDue(ctx); err != nil {
-				e.logger.Error("scheduler expire", "err", err)
-			} else if n > 0 {
-				e.logger.Info("scheduler revoked expired tickets", "count", n)
-			}
+			e.schedulerPass(ctx)
 		}
 	}
+}
+
+func (e *Engine) schedulerPass(ctx context.Context) {
+	if n, err := e.ExpireDue(ctx); err != nil {
+		e.logger.Error("scheduler expire", "err", err)
+	} else if n > 0 {
+		e.logger.Info("scheduler revoked expired tickets", "count", n)
+	}
+	if n, err := e.RebuildForwards(ctx); err != nil {
+		e.logger.Error("scheduler rebuild forwards", "err", err)
+	} else if n > 0 {
+		e.logger.Info("scheduler rebuilt forward addresses", "count", n)
+	}
+}
+
+// buildTargets expands frozen assets × ticket ports into Agent forward targets.
+func buildTargets(assets []store.YusuiAsset, ports []int32, proto string) []agentgw.Target {
+	var targets []agentgw.Target
+	for _, a := range assets {
+		for _, p := range ports {
+			targets = append(targets, agentgw.Target{DstIP: a.IpInternal.String(), DstPort: p, Proto: proto})
+		}
+	}
+	return targets
 }
 
 // ---- internals ----

@@ -5,6 +5,7 @@ import { useI18n } from "vue-i18n"
 import { ElMessageBox, ElNotification } from "element-plus"
 import { Terminal } from "@xterm/xterm"
 import { FitAddon } from "@xterm/addon-fit"
+import { WebglAddon } from "@xterm/addon-webgl"
 import "@xterm/xterm/css/xterm.css"
 import { session } from "../auth"
 
@@ -31,6 +32,17 @@ onMounted(() => {
   fit = new FitAddon()
   term.loadAddon(fit)
   term.open(termEl.value!)
+  // GPU-accelerated rendering — the default DOM renderer janks on every
+  // keystroke when the browser is busy (many tabs), which reads as terminal
+  // lag even though the round-trip is a few ms. Fall back to DOM if WebGL is
+  // unavailable or its context is lost.
+  try {
+    const webgl = new WebglAddon()
+    webgl.onContextLoss(() => webgl.dispose())
+    term.loadAddon(webgl)
+  } catch {
+    /* no WebGL — keep the DOM renderer */
+  }
   fit.fit()
 
   const id = route.params.id

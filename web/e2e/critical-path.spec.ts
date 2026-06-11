@@ -1,5 +1,23 @@
-import { test, expect, request as playwrightRequest } from "@playwright/test"
+import { test, expect, request as playwrightRequest, Page } from "@playwright/test"
 import { ADMIN, TICKET_REASON, seedActiveTicket } from "./helpers"
+
+// Read the visible terminal content from xterm's buffer (renderer-agnostic — the
+// WebGL/canvas renderer leaves no text in the DOM, unlike the old DOM renderer).
+// Terminal.vue exposes the instance on window.__yusuiTerm for tests.
+function termText(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const t = (window as any).__yusuiTerm
+    if (!t) return ""
+    const buf = t.buffer.active
+    let s = ""
+    for (let i = 0; i < buf.length; i++) s += (buf.getLine(i)?.translateToString(true) ?? "") + "\n"
+    return s
+  })
+}
+async function expectTerm(page: Page, text: string, timeout = 15_000) {
+  await expect.poll(() => termText(page), { timeout }).toContain(text)
+}
 
 // The MVP's critical path, solidified from the manual browser walkthrough:
 // submit → approve → open Web SSH → dangerous-command filter → normal command.
@@ -23,20 +41,17 @@ test("submit→approve→Web SSH: rm -rf / is blocked, whoami runs", async ({ pa
   await row.getByRole("button", { name: "打开终端" }).click()
   await expect(page).toHaveURL(/\/tickets\/\d+\/terminal$/)
 
-  // xterm uses the DOM renderer here (only FitAddon is loaded), so terminal
-  // text is real DOM under .xterm-rows.
-  const screen = page.locator(".xterm-rows")
-  await expect(screen).toContainText("已连接", { timeout: 15_000 })
-  await expect(screen).toContainText("$", { timeout: 15_000 }) // asset shell prompt is ready
+  await expectTerm(page, "已连接")
+  await expectTerm(page, "$") // asset shell prompt is ready
 
   // Dangerous command: filtered on Enter, never reaches the shell.
   await page.getByRole("textbox", { name: "Terminal input" }).click()
   await page.keyboard.type("rm -rf /")
   await page.keyboard.press("Enter")
-  await expect(screen).toContainText("已拦截", { timeout: 10_000 })
+  await expectTerm(page, "已拦截", 10_000)
 
   // Normal command still executes (proves the shell is live, not killed).
   await page.keyboard.type("whoami")
   await page.keyboard.press("Enter")
-  await expect(screen).toContainText("ops-yusui", { timeout: 10_000 })
+  await expectTerm(page, "ops-yusui", 10_000)
 })

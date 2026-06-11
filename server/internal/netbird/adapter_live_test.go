@@ -62,7 +62,17 @@ func TestLiveContract(t *testing.T) {
 	if !containsName(len(policies), func(i int) string { return policies[i].Name }, pname) {
 		t.Fatalf("policy %q not found after ensure", pname)
 	}
-	t.Logf("live contract OK against %s: group=%s policy=%s", base, g1, p1)
+
+	// Setup-key issuance (docs/11 P2): mint returns a usable plaintext key + id.
+	sk, err := a.CreateSetupKey(ctx, "yusui:test:enroll", 3600)
+	if err != nil {
+		t.Fatalf("CreateSetupKey: %v", err)
+	}
+	if sk.Key == "" || sk.ID == "" {
+		t.Fatalf("CreateSetupKey returned empty key/id: %+v", sk)
+	}
+
+	t.Logf("live contract OK against %s: group=%s policy=%s setupkey=%s", base, g1, p1, sk.ID)
 }
 
 func containsName(n int, at func(int) string, want string) bool {

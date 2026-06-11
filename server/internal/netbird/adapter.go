@@ -86,6 +86,13 @@ type Policy struct {
 	Enabled bool   `json:"enabled"`
 }
 
+// SetupKey is a NetBird enrollment key. The plaintext `Key` is returned only on
+// creation (docs/11 P2: bound to an agent on admin approval).
+type SetupKey struct {
+	ID  string `json:"id"`
+	Key string `json:"key"`
+}
+
 // Adapter is a thin NetBird Mgmt REST client.
 type Adapter struct {
 	base   string
@@ -190,7 +197,7 @@ func (a *Adapter) EnsureBuiltinPolicy(ctx context.Context, name, srcGroupID stri
 	}
 	body := map[string]any{
 		"name":        name,
-		"description": "YuSui permanent policy: server-peer -> all agents; ports enforced by Agent nftables",
+		"description": "YuSui permanent policy: server-peer -> all agents; per-ticket access enforced by the Agent's userspace forwarder (draft10)",
 		"enabled":     true,
 		"rules": []map[string]any{{
 			"name":          name + ":r0",
@@ -208,6 +215,26 @@ func (a *Adapter) EnsureBuiltinPolicy(ctx context.Context, name, srcGroupID stri
 	}
 	a.logger.Info("netbird builtin policy created", "name", name, "id", created.ID)
 	return created.ID, nil
+}
+
+// CreateSetupKey mints a reusable enrollment key for joining peers to the
+// overlay (docs/11 P2: the Server binds one to an agent on admin approval and
+// hands it back so the agent's daemon can `netbird up --setup-key`). The
+// plaintext key is only available here, on creation.
+func (a *Adapter) CreateSetupKey(ctx context.Context, name string, expiresInSec int) (SetupKey, error) {
+	body := map[string]any{
+		"name":        name,
+		"type":        "reusable",
+		"expires_in":  expiresInSec,
+		"usage_limit": 0,
+		"ephemeral":   false,
+	}
+	var sk SetupKey
+	if err := a.do(ctx, http.MethodPost, "/api/setup-keys", body, &sk); err != nil {
+		return SetupKey{}, err
+	}
+	a.logger.Info("netbird setup key created", "name", name, "id", sk.ID)
+	return sk, nil
 }
 
 // as is a tiny errors.As shim to avoid importing errors twice in hot paths.

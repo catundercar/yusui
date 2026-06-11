@@ -8,7 +8,9 @@
 // Env: YUSUI_SERVER_GRPC, YUSUI_PROJECT, YUSUI_REGISTER_TOKEN,
 //
 //	YUSUI_HOSTNAME (default os hostname), YUSUI_ENFORCER (forward|nft),
-//	YUSUI_LISTEN_HOST (overlay IP to bind forwarders), YUSUI_EGRESS_IFACE (nft masquerade).
+//	YUSUI_LISTEN_HOST (overlay IP to bind forwarders), YUSUI_EGRESS_IFACE (nft masquerade),
+//	YUSUI_OVERLAY (static|netbird), and for netbird: YUSUI_NB_IFACE (default wt0),
+//	YUSUI_NB_SETUP_KEY, YUSUI_NB_MGMT_URL.
 package main
 
 import (
@@ -34,6 +36,7 @@ func main() {
 
 	cfg := struct {
 		serverGRPC, project, token, host, iface, enforcerKind, listenHost, overlayKind string
+		nbIface, nbSetupKey, nbMgmtURL                                                 string
 	}{
 		serverGRPC:   getenv("YUSUI_SERVER_GRPC", "localhost:9090"),
 		project:      os.Getenv("YUSUI_PROJECT"),
@@ -43,6 +46,9 @@ func main() {
 		enforcerKind: getenv("YUSUI_ENFORCER", "forward"),
 		listenHost:   os.Getenv("YUSUI_LISTEN_HOST"),
 		overlayKind:  getenv("YUSUI_OVERLAY", "static"),
+		nbIface:      os.Getenv("YUSUI_NB_IFACE"),
+		nbSetupKey:   os.Getenv("YUSUI_NB_SETUP_KEY"),
+		nbMgmtURL:    os.Getenv("YUSUI_NB_MGMT_URL"),
 	}
 	if cfg.project == "" {
 		logger.Error("YUSUI_PROJECT is required")
@@ -53,7 +59,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	ov, err := overlay.New(cfg.overlayKind, cfg.listenHost)
+	ov, err := overlay.New(overlay.Config{
+		Kind: cfg.overlayKind, ListenHost: cfg.listenHost,
+		Iface: cfg.nbIface, SetupKey: cfg.nbSetupKey, MgmtURL: cfg.nbMgmtURL, Logger: logger,
+	})
 	if err != nil {
 		logger.Error("overlay init failed", "err", err)
 		os.Exit(1)

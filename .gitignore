@@ -22,3 +22,4 @@ web/playwright-report/
 
 # playwright artifacts
 .playwright-mcp/
+/dist/

@@ -16,9 +16,9 @@ draft10(见 [02](02-agent-design.md)/[03](03-agent-protocol.md)/[04](04-netbird-
 |---|---|---|---|---|
 | **NetBird daemon 管理(`overlay.Netbird`)** | 占位(门控报错) | `overlay.New("netbird",...)` 直接返回「未实现」错误;默认 `static` 假设 NetBird 由 installer 在 agent 之外管理。**不做 → 生产环境 agent 无法自管 NetBird 入网/健康/掉线上报**。需要真 NetBird daemon 才能写 daemon gRPC 客户端并验证。 | draft10 收尾 | `agent/internal/overlay/overlay.go` |
 | **Windows installer** | 未实现 | draft10 定的「独立 installer 装 wintun 驱动 + netbird 服务 + agent.exe 服务」还没有。**不做 → Windows 上无法一键部署 agent**。 | draft10 收尾 | [02 §2.9](02-agent-design.md) |
-| **服务器重启后 `forward_addr` 重建** | 偏离 | 引擎的 `ticket→forward_addr` 是**内存态**;`engine.go` 注释声称「reconcile 重启后重建」,但 `Reconcile` 只比对 agent 的 active rule_id,**不 re-Apply**,且启动期没有对活动工单 re-Apply 的逻辑。**不做 → server 重启后,已 active 工单的 Web Shell 解析到空 `forward_addr`,在真 overlay 下会直连资产 IP 而失败**(loopback/mock 因资产直连可达掩盖了这点)。需要:启动期 + 周期对活动工单 re-Apply(重新拿 `forward_addr`)。 | draft10 收尾 | `server/internal/policy/engine.go` |
+| ~~**服务器重启后 `forward_addr` 重建**~~ | ✅ 已修复 | 引擎新增 `RebuildForwards`:调度器启动即跑一趟 + 每 5s,对 active 工单按 `rule_id` **幂等 re-Apply** 回填内存 `forward_addr`(agent 转发器对同 `rule_id` 幂等,不扰动在途连接);map 的 key 存在性=本进程已应用,避免重复下发。配套修了 `GracefulStop` 无界阻塞——agent 长连 Control 流会让每次 SIGTERM(部署/重启)挂住并占住端口,改为「优雅 5s 后强制 `Stop()`」。`e2e-grpc` 加重启相位守门(重启→重连→重建→Web Shell 仍走转发器)。 | — | `server/internal/policy/engine.go`、`cmd/yusui-server/main.go` |
 | **多 target 的 `forward_addr`** | 部分(MVP 简化) | `agentgw.Gateway.ApplyRule` 只回传**第一个 target** 的转发地址;一张工单多资产/多端口时,其余 target 的转发地址拿不到。**不做 → 多资产工单只有第一个能经转发器连**(MVP 工单基本单 target,暂不影响)。需要 per-target 地址映射(`map[ip:port]addr`)+ Web Shell 按 (asset,port) 解析。 | v0.2 | `server/internal/agentgw/`、`controller.go`、`engine.go` |
-| **Agent 本地持久化(BoltDB)** | 偏离 | [02 §2.7](02-agent-design.md) 写「BoltDB 缓存活动规则,崩溃可重建」,但代码里 `forward`/`nft` 都是**纯内存 map**,无 bbolt 依赖。**不做 → agent 进程重启丢失活动转发器,要等下次对账重建**(目前对账也不 re-Apply,见上)。 | draft10 收尾 | `agent/internal/forward/`、`agent/internal/nft/` |
+| **Agent 本地持久化 / agent 重启自愈** | 偏离 | [02 §2.7](02-agent-design.md) 写「BoltDB 缓存活动规则,崩溃可重建」,但 `forward`/`nft` 都是**纯内存 map**,无 bbolt。**Server 重启已自愈**(`RebuildForwards`,见上),但 **agent 单独重启未自愈**:转发器全丢,而 Server 的 `forward_addr` map 仍指向已死端口(`forwardKnown=true` 故不会重下发)→ Web Shell 连到死转发器。需要二选一:agent 侧 BoltDB 重建,或 Server 在 agent **重连**时清掉该 agent 的 forward 条目触发 re-Apply。 | draft10 收尾 | `agent/internal/forward/`、`server/internal/policy/engine.go`、`agentctl` |
 | **docs 残留旧表述清扫** | 偏离 | `docs/01/05/06/07` 仍有 `nftables` / Network Route / Routing Peer 等 draft1~9 表述,与 draft10 冲突(draft10 只扫了 02/03/04 + CLAUDE.md + DESIGN)。**不做 → 文档自相矛盾,误导后来者**。 | 文档债 | `docs/01,05,06,07` |
 
 ---
@@ -75,6 +75,5 @@ draft10(见 [02](02-agent-design.md)/[03](03-agent-protocol.md)/[04](04-netbird-
 ## 未决问题
 
 - `overlay.Netbird` 用 NetBird 官方 daemon 的本地 gRPC API,还是退回内嵌 SDK(`client/embed`)?当前定的是「管理 daemon」,但没有 NetBird 环境无法落地验证——需要先确认一个带 NetBird 的测试环境。
-- 服务器重启后重建 `forward_addr`:是启动期对所有 active 工单 re-Apply,还是把 `forward_addr` 也持久化进 `policy_bindings`(但它每次 Apply 都变,持久化会很快过期)?倾向前者。
 - `secondary` agent:在 UI 上先标注「v0.3 预留、当前不参与转发」,还是 v0.1 直接隐藏该选项?
 - river vs 进程内 ticker:v0.1 单 server 下 ticker 够用,是否值得在 v0.1 就引入 river 以避免 v0.3 重写?

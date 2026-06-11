@@ -44,6 +44,9 @@ onMounted(() => {
     /* no WebGL — keep the DOM renderer */
   }
   fit.fit()
+  // Test hook: e2e reads terminal content from the buffer (renderer-agnostic —
+  // the WebGL/canvas renderer leaves no text in the DOM).
+  ;(window as unknown as { __yusuiTerm?: Terminal }).__yusuiTerm = term
 
   const id = route.params.id
   const proto = location.protocol === "https:" ? "wss" : "ws"

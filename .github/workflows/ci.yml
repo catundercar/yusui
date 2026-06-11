@@ -78,6 +78,8 @@ jobs:
           node-version: "20"
       - name: install web deps
         run: cd web && npm ci
+      - name: typecheck web (vue-tsc)
+        run: cd web && npm run typecheck
       - name: install playwright chromium
         run: cd web && npx playwright install --with-deps chromium
       - name: bring up stack + run e2e

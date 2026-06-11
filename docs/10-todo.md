@@ -66,7 +66,7 @@ draft10(见 [02](02-agent-design.md)/[03](03-agent-protocol.md)/[04](04-netbird-
 | 项 | 状态 | 现状 / 不做会怎样 |
 |---|---|---|
 | **审批 + step-up + 自审批拦截 的 e2e** | 未实现 | 手验过(浏览器),但没固化进 Playwright(`web/e2e` 只覆盖创建链路 + critical-path + 401)。**不做 → 审批/二次认证回归无守门**。 |
-| **TS 类型检查进 CI** | 未实现 | `npm run build` 只跑 `vite build`(无 `tsc`),前端类型错误 CI 不拦。建议加 `tsc --noEmit` 步骤。 |
+| ~~**TS 类型检查进 CI**~~ | ✅ 已修复 | `web` 加 `npm run typecheck`(`vue-tsc --noEmit`,识别 `.vue` SFC),CI `e2e` job 在 playwright 前跑;`src/shims.d.ts` 声明无类型的 fontsource 副作用包。 |
 | **NetBird Adapter 契约测试** | 未实现 | [04 §4.12](04-netbird-adapter.md):CI 起真实 NetBird Mgmt 跑 Adapter 全流程。现仅 mock 单测。 |
 | **compose 栈无自动化测试** | 已知 | CI 用 `e2e-stack.sh`/`e2e-grpc.sh` 直跑进程,不起 docker-compose;compose 编排(如 restart 策略)靠人工 + 注释。 |
 

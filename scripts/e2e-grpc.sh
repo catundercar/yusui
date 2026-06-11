@@ -25,8 +25,10 @@ WST=/tmp/yusui-grpc-wst
 SRVLOG=/tmp/yusui-grpc-srv.log
 SRVLOG2=/tmp/yusui-grpc-srv2.log
 AGTLOG=/tmp/yusui-grpc-agt.log
+AGTLOG2=/tmp/yusui-grpc-agt2.log
 WSTOUT=/tmp/yusui-grpc-wst.out
 WSTOUT2=/tmp/yusui-grpc-wst2.out
+WSTOUT3=/tmp/yusui-grpc-wst3.out
 
 if command -v brew >/dev/null 2>&1; then
   PGBIN="$(brew --prefix postgresql@16 2>/dev/null)/bin"
@@ -104,10 +106,13 @@ AID=$(curl -fsS "${A[@]}" -X POST $API/api/v1/assets -d "{\"project_id\":$PID,\"
 curl -fsS "${A[@]}" -X POST $API/api/v1/assets/$AID/credentials -d '{"ssh_user":"ops-yusui","auth_kind":"password","secret":"hunter2"}' >/dev/null
 
 echo "== real agent auto-registers (YUSUI_ENFORCER=forward) =="
-YUSUI_SERVER_GRPC="$GRPC" YUSUI_PROJECT=alpha YUSUI_REGISTER_TOKEN="$REGTOK" YUSUI_HOSTNAME=alpha-agent \
-  YUSUI_ENFORCER=forward YUSUI_LISTEN_HOST=127.0.0.1 \
-  "$AGT" >"$AGTLOG" 2>&1 &
-AGTPID=$!
+start_agent() { # $1 = logfile; sets AGTPID
+  YUSUI_SERVER_GRPC="$GRPC" YUSUI_PROJECT=alpha YUSUI_REGISTER_TOKEN="$REGTOK" YUSUI_HOSTNAME=alpha-agent \
+    YUSUI_ENFORCER=forward YUSUI_LISTEN_HOST=127.0.0.1 \
+    "$AGT" >"$1" 2>&1 &
+  AGTPID=$!
+}
+start_agent "$AGTLOG"
 # It registers as pending and waits for approval (no control stream yet).
 for _ in $(seq 1 30); do grep -qi 'awaiting admin approval' "$AGTLOG" 2>/dev/null && break; sleep 1; done
 
@@ -149,6 +154,23 @@ echo "== drive Web Shell again post-restart (same JWT secret → ADM still valid
 "$WST" "ws://127.0.0.1:8089/api/v1/ws/tickets/$TID/terminal?access_token=$ADM" "$ADM" >"$WSTOUT2" 2>&1
 cat "$WSTOUT2"
 
+# --- agent-restart self-heal (docs/10) ---
+# Kill + restart the AGENT: its userspace forwarders die. On reconnect the Server
+# (OnAgentReconnect) drops the cached forward addresses for this agent's active
+# tickets and re-Applies them to the NEW forwarder. Unlike the server-restart
+# case, loopback does NOT mask a miss here — the old forwarder port is genuinely
+# dead — so a successful post-restart Web Shell proves the rebuild.
+echo "== restart AGENT (agent-restart self-heal) =="
+kill "$AGTPID" 2>/dev/null
+sleep 2
+start_agent "$AGTLOG2"
+# agent re-registers (already approved) → server clears + re-applies its tickets
+for _ in $(seq 1 30); do grep -q 'agent reconnected; re-applying' "$SRVLOG2" 2>/dev/null && break; sleep 1; done
+
+echo "== drive Web Shell after AGENT restart (old forwarder is dead) =="
+"$WST" "ws://127.0.0.1:8089/api/v1/ws/tickets/$TID/terminal?access_token=$ADM" "$ADM" >"$WSTOUT3" 2>&1
+cat "$WSTOUT3"
+
 echo "===== ASSERTIONS ====="
 pass=1
 check() { if eval "$2"; then echo "  PASS: $1"; else echo "  FAIL: $1"; pass=0; fi; }
@@ -162,4 +184,7 @@ check "command filter blocked rm -rf / via forwarder" "grep -q 'GOT_BLOCK=true' 
 check "forward_addr rebuilt after server restart"     "grep -q 'rebuilt forward address after restart' '$SRVLOG2'"
 check "post-restart Web Shell dialed the forwarder"   "grep -qi 'dialing asset via agent forwarder' '$SRVLOG2'"
 check "post-restart whoami relayed through forwarder" "grep -q 'OUTPUT_HAS_USER=true' '$WSTOUT2'"
+check "server re-applied on agent reconnect"          "grep -q 'agent reconnected; re-applying' '$SRVLOG2'"
+check "restarted agent opened a new forwarder"        "grep -qi 'forwarder up' '$AGTLOG2'"
+check "post-agent-restart whoami via rebuilt fwd"     "grep -q 'OUTPUT_HAS_USER=true' '$WSTOUT3'"
 if [ "$pass" = 1 ]; then echo "GRPC FORWARDER E2E: PASS"; else echo "GRPC FORWARDER E2E: FAIL"; exit 1; fi

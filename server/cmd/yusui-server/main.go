@@ -114,6 +114,9 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 		gw = agentgw.NewMemory(logger)
 	}
 	engine := policy.NewEngine(db, gw, logger, cfg.ServerPeerIPs)
+	if controller != nil {
+		controller.SetForwardManager(engine) // rebuild an agent's forwards when it reconnects
+	}
 	ticketH := httpapi.NewTicketHandler(engine)
 
 	shellMgr := webshell.NewManager(db, catalog, cfg.RecordingsDir, logger)

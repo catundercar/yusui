@@ -41,6 +41,14 @@ func (a *agentConn) waitAck(cmdID string) chan *agentv1.AckCommand {
 }
 func (a *agentConn) clearAck(cmdID string) { a.mu.Lock(); delete(a.acks, cmdID); a.mu.Unlock() }
 
+// ForwardManager is notified when an Agent (re)connects so it can rebuild that
+// Agent's forwarder addresses. An Agent restart drops its userspace forwarders;
+// the Server's cached forward addresses then point at dead ports until they are
+// re-Applied. Implemented by the Policy Engine; wired via SetForwardManager.
+type ForwardManager interface {
+	OnAgentReconnect(ctx context.Context, agentID int64)
+}
+
 // Controller implements agentv1.AgentControlServer and agentgw.Gateway.
 type Controller struct {
 	agentv1.UnimplementedAgentControlServer
@@ -48,11 +56,17 @@ type Controller struct {
 	logger   *slog.Logger
 	regToken string
 	cmdTO    time.Duration
+	fwdMgr   ForwardManager
 
 	mu     sync.Mutex
 	conns  map[int64]*agentConn // agentID -> conn
 	tokens map[string]int64     // session_token -> agentID
 }
+
+// SetForwardManager wires the engine that rebuilds forwards on agent reconnect.
+// Set after construction to avoid an import cycle (engine imports agentgw, which
+// the controller implements).
+func (c *Controller) SetForwardManager(m ForwardManager) { c.fwdMgr = m }
 
 // New constructs the controller. regToken is the shared one-time-ish register
 // token agents present (empty = accept any, dev only).
@@ -184,6 +198,14 @@ func (c *Controller) Control(stream agentv1.AgentControl_ControlServer) error {
 			}
 		}
 	}()
+
+	// The Agent may have just restarted (dropping its forwarders). Re-apply its
+	// active tickets so cached forward addresses don't point at dead ports. Run
+	// in a goroutine: the re-Apply roundtrips need the Recv loop below to route
+	// their acks. Background ctx so it survives this stream if it briefly flaps.
+	if c.fwdMgr != nil {
+		go c.fwdMgr.OnAgentReconnect(context.Background(), agentID)
+	}
 
 	for {
 		in, err := stream.Recv()

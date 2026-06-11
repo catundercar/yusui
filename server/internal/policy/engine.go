@@ -361,6 +361,35 @@ func (e *Engine) RebuildForwards(ctx context.Context) (int, error) {
 	return n, nil
 }
 
+// OnAgentReconnect drops the cached forward addresses for the reconnecting
+// Agent's active tickets and immediately re-Applies them. An Agent restart loses
+// its userspace forwarders, but the Server's map still holds the old (dead)
+// addresses with key-presence marking them "applied" — so RebuildForwards would
+// otherwise skip them and the project's new Web Shell sessions would dial dead
+// ports until the Server itself restarts. Idempotent and safe on a brief flap
+// (re-Apply returns the same address if the forwarder survived).
+func (e *Engine) OnAgentReconnect(ctx context.Context, agentID int64) {
+	active, err := e.db.ListActiveTickets(ctx)
+	if err != nil {
+		e.logger.Error("on agent reconnect: list active tickets", "agent_id", agentID, "err", err)
+		return
+	}
+	cleared := 0
+	for _, t := range active {
+		if b, err := e.db.GetBinding(ctx, t.ID); err == nil && b.AgentID == agentID {
+			e.clearForward(t.ID)
+			cleared++
+		}
+	}
+	if cleared == 0 {
+		return
+	}
+	e.logger.Info("agent reconnected; re-applying its active tickets", "agent_id", agentID, "tickets", cleared)
+	if _, err := e.RebuildForwards(ctx); err != nil {
+		e.logger.Error("rebuild forwards after agent reconnect", "agent_id", agentID, "err", err)
+	}
+}
+
 // reapply re-issues an active ticket's existing binding to the Agent and returns
 // the forwarder address (idempotent; does not change ticket state or the DB).
 func (e *Engine) reapply(ctx context.Context, t store.YusuiTicket) (string, error) {

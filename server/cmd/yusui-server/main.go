@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -84,6 +85,7 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 	if err := cfg.RequireServe(); err != nil {
 		return err
 	}
+	warnWeakSecrets(cfg, logger)
 	db, err := store.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
@@ -146,7 +148,12 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 			Ready: db, Logger: logger, Auth: authH, Catalog: catalogH,
 			Ticket: ticketH, WebShell: webShellH, Manager: mgr, StepUpWindow: cfg.StepUpWindow,
 		}),
+		// ReadHeaderTimeout guards against slowloris; IdleTimeout reaps idle
+		// keep-alive connections. No Read/WriteTimeout: the Web Shell WebSocket
+		// shares this server and would be cut mid-session (the WS library manages
+		// its own per-message deadlines after the upgrade).
 		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	installNetBird(ctx, cfg, logger)
@@ -187,6 +194,33 @@ func runServe(ctx context.Context, cfg config.Config, logger *slog.Logger) error
 		defer cancel()
 		return srv.Shutdown(shCtx)
 	}
+}
+
+// warnWeakSecrets logs a loud warning (it does NOT fail) when the serve secrets
+// look like development placeholders or are too short, so an accidental insecure
+// deploy is visible in the logs instead of silent. Production must set strong,
+// unique values for JWT_SECRET and CREDENTIAL_KEY.
+func warnWeakSecrets(cfg config.Config, logger *slog.Logger) {
+	const minLen = 32
+	if len(cfg.JWTSecret) < minLen || looksLikeDevSecret(cfg.JWTSecret) {
+		logger.Warn("JWT_SECRET looks weak or like a dev default; use a strong random value (>=32 chars) in production", "len", len(cfg.JWTSecret))
+	}
+	switch {
+	case cfg.CredentialKey == "":
+		logger.Warn("CREDENTIAL_KEY is unset; the asset-secret sealing key is derived from JWT_SECRET (dev only) — set a dedicated key in production")
+	case len(cfg.CredentialKey) < minLen || looksLikeDevSecret(cfg.CredentialKey):
+		logger.Warn("CREDENTIAL_KEY looks weak or like a dev default; use a strong value in production", "len", len(cfg.CredentialKey))
+	}
+}
+
+func looksLikeDevSecret(s string) bool {
+	l := strings.ToLower(s)
+	for _, m := range []string{"change-me", "changeme", "dev-", "devsecret", "secret", "password", "admin", "test", "example"} {
+		if strings.Contains(l, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // seedAdmin creates the first admin account on a fresh DB (dev convenience).

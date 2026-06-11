@@ -1,9 +1,17 @@
-# NetBird overlay (M4) — deployment runbook
+# NetBird overlay — deployment runbook
+
+> **draft10 update + verified.** For a runnable LOCAL stack and the verified
+> path, see [deploy/netbird/](netbird/) (control plane + adapter contract test +
+> `scripts/e2e-overlay.sh`). This file is the conceptual runbook.
 
 YuSui uses NetBird purely as transport (docs §0): only the **Server** and each
-project **Agent** are NetBird peers; end users and assets are not. The per-ticket
-access decision is enforced by the **Agent's nftables** (verified in M3) — NetBird
-carries exactly one permanent policy.
+project **Agent** are NetBird peers; end users and assets are not. **draft10:** the
+Agent is a *plain* peer (it does NOT advertise the project CIDR as a NetBird
+route); the Server dials the Agent's overlay IP and the Agent's **userspace L4
+forwarder** relays per ticket to the asset. NetBird carries exactly one permanent
+policy (`yusui:builtin:server-to-agents`); the per-ticket decision is the Agent
+forwarder's existence + source-allowlist, not nftables (nftables is an optional
+Linux-only enforcer).
 
 ## What the code does
 - `server/internal/netbird` (NetBird Adapter, docs/04): REST-only client with
@@ -28,21 +36,21 @@ Use NetBird's official self-hosted compose (management + signal + coturn +
 dashboard + IdP). See https://docs.netbird.io/selfhosted/selfhosted-guide.
 Create a setup key (for agents) and a PAT (for the YuSui server adapter).
 
-## Make Server + Agents peers
-- **Server**: run the NetBird client on the server host/container: `netbird up
-  --setup-key <KEY> --management-url $NETBIRD_MGMT_URL`. Note its overlay IP →
-  `SERVER_PEER_IPS`.
-- **Agent**: the `yusui-agent` container additionally runs `netbird up
-  --setup-key <KEY> ...` to join the overlay (the agent is the project's only
-  peer / routing peer). The agent then advertises the project CIDR as a NetBird
-  Network Route (assigned by the server via the adapter).
-- The server reaches assets as: `Server-Peer → (overlay) → Agent → nftables → asset`.
+## Make Server + Agents peers (draft10)
+- **Server**: runs the NetBird client (its overlay IP → `SERVER_PEER_IPS`, the
+  ACL source). The Server dials Agents at their overlay IPs.
+- **Agent**: `overlay.Netbird` brings the daemon up (`netbird up --setup-key`)
+  and reads the overlay IP from the WireGuard interface; the per-ticket userspace
+  forwarder binds on it. The Agent is a **plain peer** — no route advertisement.
+- The Server reaches assets as: `Server-Peer → (overlay) → Agent forwarder → asset`.
 
 ## Verification status
 - ✅ Adapter logic (idempotency, request shaping, error classes) — unit tests.
-- ⏳ **Live contract tests against a real NetBird Mgmt** (docs/04 §4.12) and the
-  full overlay forward-path are the remaining integration step — they require a
-  running NetBird stack and were not exercised in the dev environment. The
-  access-enforcement core (per-ticket nftables gating over gRPC) is verified
-  end-to-end in M3 without the overlay; NetBird only adds the encrypted transport
-  + the one permanent policy on top.
+- ✅ **Live contract test against a real NetBird Mgmt** (docs/04 §4.12):
+  `TestLiveContract` (group + policy + setup key, idempotent) — green against a
+  local netbird-server v0.72.x.
+- ✅ **Full overlay forward-path** (`scripts/e2e-overlay.sh`): Server + Agent each
+  a real NetBird peer; Server dials the Agent's forwarder at its overlay IP over
+  WireGuard → relays to the asset, command filter active. 6/6 assertions green.
+- The non-overlay access-enforcement core is also verified independently in
+  `scripts/e2e-grpc.sh` (forwarder + command filter on loopback).

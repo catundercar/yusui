@@ -83,7 +83,9 @@ docker compose down -v     # wipe the store (fresh install next time)
   no browser).
 - ✅ Adapter contract test green against the real Management API
   (`TestLiveContract`: `EnsureGroup` + `EnsureBuiltinPolicy` create + idempotent).
-- ⏳ Setup-key issuance (adapter `CreateSetupKey`, enrollment P2) — next.
-- ⏳ Data plane (`overlay.Netbird`: Server + Agent as real WireGuard peers) needs
-  the netbird client daemon with a TUN device in a container — viability on
-  macOS/OrbStack is the open risk.
+- ✅ Setup-key issuance (adapter `CreateSetupKey`, enrollment P2) — contract test green.
+- ✅ Data plane / **full overlay e2e** green: `scripts/e2e-overlay.sh` runs the
+  whole draft10 path over a real WireGuard overlay (Server + Agent each a NetBird
+  peer; Server dials the Agent's forwarder at its overlay IP → relays to the
+  asset, command filter active). Viable on macOS/OrbStack (NET_ADMIN + /dev/net/tun).
+- ⏳ Direct daemon-gRPC client (vs the `netbird` CLI) + mint-on-approve wiring (P2b).

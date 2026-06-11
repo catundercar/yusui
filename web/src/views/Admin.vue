@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue"
 import { useI18n } from "vue-i18n"
-import { ElMessage } from "element-plus"
-import { api, errText } from "../api"
+import { ElMessage, ElMessageBox } from "element-plus"
+import { api, withStepUp, errText } from "../api"
 
 const { t } = useI18n()
 const tab = ref("projects")
@@ -11,6 +11,7 @@ const agents = ref<any[]>([])
 const assets = ref<any[]>([])
 const users = ref<any[]>([])
 const projMap = computed(() => Object.fromEntries(projects.value.map((p) => [p.id, p.code])))
+const enrollClass = (e: string) => (e === "approved" ? "ok" : e === "pending" ? "warn" : "muted")
 
 const blank = {
   projects: () => ({ code: "", name: "", cidrs: "10.0.0.0/8" }),
@@ -65,6 +66,34 @@ const creators: Record<string, () => Promise<any>> = {
   users: () => api.createUser({ ...uf.value }),
 }
 
+// Agent enrollment approval (docs/11 §11.2): a security boundary, so it is a
+// deliberate per-row action behind step-up re-auth — same flow as ticket approve.
+function askPassword(): Promise<string> {
+  return ElMessageBox.prompt(t("admin.stepupMsg"), t("admin.stepupTitle"), {
+    inputType: "password",
+    inputPlaceholder: t("admin.stepupPh"),
+  }).then((r: any) => r.value)
+}
+async function doApproveAgent(id: number) {
+  try {
+    await withStepUp(() => api.approveAgent(id), askPassword)
+    ElMessage.success(t("admin.agentApproved"))
+    await loadAll()
+  } catch (e: any) {
+    if (e !== "cancel") ElMessage.error(errText(e))
+  }
+}
+async function doRejectAgent(id: number) {
+  try {
+    await ElMessageBox.confirm(t("admin.rejectConfirm"), t("admin.rejectTitle"), { type: "warning" })
+    await withStepUp(() => api.rejectAgent(id), askPassword)
+    ElMessage.success(t("admin.agentRejected"))
+    await loadAll()
+  } catch (e: any) {
+    if (e !== "cancel") ElMessage.error(errText(e))
+  }
+}
+
 async function submitCreate() {
   saving.value = true
   try {
@@ -113,7 +142,21 @@ async function submitCreate() {
             <el-table-column :label="t('admin.colProject')"><template #default="{ row }">{{ projMap[row.project_id] }}</template></el-table-column>
             <el-table-column prop="role" :label="t('admin.colRole')" />
             <el-table-column prop="hostname" :label="t('admin.colHostname')"><template #default="{ row }"><span class="ys-mono">{{ row.hostname }}</span></template></el-table-column>
+            <el-table-column :label="t('admin.colEnrollment')">
+              <template #default="{ row }">
+                <span class="ys-status" :class="enrollClass(row.enrollment)" :data-enrollment="row.enrollment"><i class="ys-dot" />{{ t(`enrollment.${row.enrollment}`) }}</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="status" :label="t('admin.colStatus')" />
+            <el-table-column :label="t('admin.colActions')" width="180">
+              <template #default="{ row }">
+                <template v-if="row.enrollment === 'pending'">
+                  <el-button size="small" type="success" data-act="approve-agent" @click="doApproveAgent(row.id)">{{ t("admin.approve") }}</el-button>
+                  <el-button size="small" data-act="reject-agent" @click="doRejectAgent(row.id)">{{ t("admin.reject") }}</el-button>
+                </template>
+                <span v-else class="ys-muted">—</span>
+              </template>
+            </el-table-column>
             <template #empty><div class="empty">{{ t("admin.emptyAgents") }}</div></template>
           </el-table>
         </div>
@@ -269,6 +312,9 @@ async function submitCreate() {
 }
 .ys-status.ok {
   color: var(--el-color-success);
+}
+.ys-status.warn {
+  color: var(--el-color-warning);
 }
 .ys-status.muted {
   color: var(--ys-muted);

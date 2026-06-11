@@ -96,6 +96,16 @@ up() {
   echo "== build + migrate + serve (mock gateway) =="
   (cd "$ROOT/server" && go build -o "$BIN" ./cmd/yusui-server) || { echo "server build failed"; exit 1; }
   DATABASE_URL="$MIGRATE_DSN" "$BIN" migrate
+  # Seed two PENDING agents (no API creates pending rows — only auto-register
+  # does, draft12) so the agent-approve UI spec has something to approve. Two,
+  # so the spec stays green under Playwright's CI retry (each run approves one).
+  psuper -d yusui -v ON_ERROR_STOP=1 \
+    -c "INSERT INTO yusui.projects (code, name, cidrs) VALUES ('seed-enroll','Seed Enrollment','{10.9.0.0/16}') ON CONFLICT (code) DO NOTHING;" \
+    -c "INSERT INTO yusui.agents (project_id, role, hostname, enrollment)
+        SELECT p.id, r.role, r.host, 'pending'
+        FROM yusui.projects p,
+             (VALUES ('primary','pending-agent-1'),('secondary','pending-agent-2')) AS r(role,host)
+        WHERE p.code='seed-enroll' ON CONFLICT (project_id, role) DO NOTHING;" >/dev/null
   DATABASE_URL="$APP_DSN" HTTP_ADDR=":$API_PORT" \
     JWT_SECRET="e2e-secret" ADMIN_PASSWORD="Admin12345!@" CREDENTIAL_KEY="e2e-credential-key" \
     RECORDINGS_DIR="$REC" AGENT_GATEWAY="mock" \

@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
-# Build the YuSui DEMO environment on local OrbStack: the Agent is the project's
-# only NetBird peer (a real Linux VM); the assets are sshd machines *behind* the
-# agent, reached only via the agent's per-ticket forwarder over a real overlay.
+# Build the YuSui DEMO on local Docker: the Agent is the project's only NetBird
+# peer; the assets are sshd machines *behind* the agent, reached only via the
+# agent's per-ticket forwarder over a real overlay.
 #
-#   ┌──────────────┐ assetnet (sshd containers — the machines behind the agent)
-#   │ yusui-agent  │──┬─ demo-prod-db   (prod-db)
-#   │  VM: netbird │  └─ demo-prod-app  (prod-app)
-#   │  + agent     │            ▲ reached only through the agent forwarder
-#   └─────┬────────┘            │
-#         │ real WireGuard overlay (100.x)
-#   ┌─────┴───────────────────────────────────────────────┐
-#   │ host docker: demo-server(netbird peer) + yusui-server│  ← browser :8091
-#   │              + postgres + web ; netbird ctrl :8081   │
-#   └──────────────────────────────────────────────────────┘
+#   assetnet ─┬─ demo-prod-db   (prod-db)  ┐ sshd, reached only via the
+#             └─ demo-prod-app  (prod-app) ┘ agent's per-ticket forwarder
+#        ▲
+#   demo-agent (netbird peer) + demo-yusui-agent   ← on assetnet, fronts the assets
+#        │ real WireGuard overlay (100.x)
+#   demo-server (netbird peer) + demo-yusui-srv + demo-pg + demo-web  ← browser :8091
+#        netbird ctrl :8081
 #
-# Assets are containers (not VMs) for a snappy terminal: OrbStack's VM<->VM
-# virtual NIC batches ~25% of small interactive packets ~200ms; the agent reaches
-# containers cleanly. Faithfulness note in README. The agent stays a real VM.
+# EVERYTHING is a host container — no OrbStack VM. The browser is on the host, so
+# any VM on the keystroke path stalls the terminal: OrbStack's host<->VM virtual
+# NIC batches ~5% of small interactive packets up to ~1.9s (measured), which made
+# the terminal feel laggy even though YuSui/overlay/forwarder are sub-ms. Pure
+# container<->container is sub-ms with zero stalls, so the agent runs as a peer
+# CONTAINER (not a VM). The overlay is still a real WireGuard tunnel between two
+# peer containers. Full diagnosis: diagnosis-terminal-latency.md.
 #
-# Prereqs: orb, docker, and the NetBird control plane up + admin seeded
+# Prereqs: docker, and the NetBird control plane up + admin seeded
 #   (cd deploy/netbird && ./gen-config.sh && docker compose up -d && ./seed-admin.sh)
-# Idempotent-ish: re-running recreates the docker side + assets and re-seeds; the
-# agent VM is reused.
+# Idempotent-ish: re-running recreates all containers + assets and re-seeds.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 NB_IP="${NETBIRD_HOST_IP:-$(ipconfig getifaddr en0 2>/dev/null || hostname -I | awk '{print $1}')}"
@@ -35,7 +35,7 @@ ASSET_USER=ops-yusui ; ASSET_PW=hunter2
 
 say() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 need() { command -v "$1" >/dev/null || { echo "missing: $1"; exit 1; }; }
-need orb; need docker; need curl
+need docker; need curl
 
 say "0/7  setup key from the NetBird control plane ($NB_URL)"
 PAT=$("$ROOT/deploy/netbird/bootstrap-token.sh" 2>/dev/null) || { echo "NetBird control plane not up? run deploy/netbird first"; exit 1; }
@@ -44,16 +44,12 @@ SK=$(curl -s -H "Authorization: Token $PAT" -H 'content-type: application/json' 
   | python3 -c 'import sys,json;print(json.load(sys.stdin).get("key",""))')
 [ -n "$SK" ] || { echo "could not mint a setup key"; exit 1; }
 
-# ---- VMs ---------------------------------------------------------------------
-have_vm() { orb list 2>/dev/null | awk '{print $1}' | grep -qx "$1"; }
-vm_ip() { orb -m "$1" bash -c "ip -4 -o addr show eth0 2>/dev/null | awk '{print \$4}' | cut -d/ -f1" 2>/dev/null; }
-
 say "1/7  asset machines behind the agent (sshd containers on isolated assetnet)"
-# Asset machines are CONTAINERS, not VMs: OrbStack's VM<->VM virtual NIC batches
-# ~25% of small interactive packets ~200ms, which made the terminal feel laggy
-# (a local-virtualization artifact, not YuSui — see README). The agent reaches
-# containers cleanly. They sit on their own 'assetnet'.
+# Asset machines are CONTAINERS on their own 'assetnet'; the agent peer joins the
+# same network and is their only way in. (Containers, not VMs — see the header /
+# diagnosis-terminal-latency.md for why anything on a VM stalls the terminal.)
 ASSET_PORT=2222
+docker rm -f demo-yusui-agent demo-agent >/dev/null 2>&1  # release assetnet so it can be recreated
 docker network rm assetnet >/dev/null 2>&1; docker network create assetnet >/dev/null
 mkasset_ctr() { # $1 container  $2 hostname
   docker rm -f "$1" >/dev/null 2>&1
@@ -68,16 +64,17 @@ A1_IP=$(docker inspect demo-prod-db  --format '{{(index .NetworkSettings.Network
 A2_IP=$(docker inspect demo-prod-app --format '{{(index .NetworkSettings.Networks "assetnet").IPAddress}}')
 echo "  prod-db=$A1_IP  prod-app=$A2_IP  (sshd :$ASSET_PORT)"
 
-say "2/7  agent VM (netbird daemon joins the overlay)"
-have_vm yusui-agent || orb create ubuntu:noble yusui-agent >/dev/null 2>&1
-orb -m yusui-agent sudo bash -c "
-  command -v netbird >/dev/null || curl -fsSL https://pkgs.netbird.io/install.sh | sh >/dev/null 2>&1
-  systemctl enable netbird >/dev/null 2>&1
-  netbird up --setup-key '$SK' --management-url $NB_URL --hostname yusui-agent >/dev/null 2>&1
-  for _ in \$(seq 1 20); do ip -4 addr show wt0 2>/dev/null | grep -q inet && break; sleep 2; done" 2>&1 | tail -0
-AGT_OIP=$(orb -m yusui-agent bash -c "ip -4 -o addr show wt0 | awk '{print \$4}' | cut -d/ -f1")
-AGT_IP=$(vm_ip yusui-agent)
-echo "  agent overlay IP=$AGT_OIP  private IP=$AGT_IP"
+say "2/7  agent peer (netbird container on assetnet — the assets' only way in)"
+# The agent is a netbird peer CONTAINER (mirrors the server peer below): it joins
+# the overlay and sits on assetnet, so it reaches the assets directly while the
+# server can reach them only by dialing this peer's overlay IP. yusui-agent (next,
+# step 5) runs in this container's netns and reads its wt0.
+docker rm -f demo-yusui-agent demo-agent >/dev/null 2>&1
+docker run -d --name demo-agent --network assetnet --cap-add NET_ADMIN --device /dev/net/tun \
+  -e NB_SETUP_KEY="$SK" -e NB_MANAGEMENT_URL="$NB_URL" -e NB_HOSTNAME=yusui-agent netbirdio/netbird:latest >/dev/null
+for _ in $(seq 1 30); do docker exec demo-agent sh -c 'ip -4 addr show wt0 2>/dev/null | grep -q inet' && break; sleep 2; done
+AGT_OIP=$(docker exec demo-agent sh -c "ip -4 -o addr show wt0 | awk '{print \$4}' | cut -d/ -f1")
+echo "  agent overlay IP=$AGT_OIP  (on assetnet → reaches prod-db/prod-app directly)"
 
 say "3/7  isolation note"
 # On a single OrbStack host the underlying network is flat, so the server can
@@ -110,30 +107,15 @@ docker run -d --name demo-web --network "$NET" -p "$WEB_PORT:80" yusui-web:lates
 for _ in $(seq 1 30); do curl -fsS "http://localhost:$WEB_PORT/" >/dev/null 2>&1 && break; sleep 1; done
 echo "  server overlay IP=$SRV_OIP  web=http://localhost:$WEB_PORT"
 
-say "5/7  run the yusui-agent in the agent VM (overlay mode → server $SRV_OIP:9091)"
-orb -m yusui-agent sudo systemctl stop yusui-agent 2>/dev/null  # release the binary (Text file busy on re-run)
-cat /tmp/yusui-dist/yusui-agent-linux-arm64 2>/dev/null | orb -m yusui-agent sudo bash -c 'cat > /usr/local/bin/yusui-agent && chmod +x /usr/local/bin/yusui-agent' 2>/dev/null \
-  || { (cd "$ROOT/agent" && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o /tmp/yusui-agent-arm64 ./cmd/yusui-agent) && cat /tmp/yusui-agent-arm64 | orb -m yusui-agent sudo bash -c 'cat > /usr/local/bin/yusui-agent && chmod +x /usr/local/bin/yusui-agent'; }
-orb -m yusui-agent sudo bash -c "cat > /etc/systemd/system/yusui-agent.service <<UNIT
-[Unit]
-Description=YuSui Agent
-After=netbird.service network-online.target
-Wants=netbird.service
-[Service]
-Environment=YUSUI_SERVER_GRPC=$SRV_OIP:9091
-Environment=YUSUI_PROJECT=$PROJECT
-Environment=YUSUI_REGISTER_TOKEN=$REGTOK
-Environment=YUSUI_HOSTNAME=yusui-agent
-Environment=YUSUI_ENFORCER=forward
-Environment=YUSUI_OVERLAY=netbird
-Environment=YUSUI_NB_IFACE=wt0
-ExecStart=/usr/local/bin/yusui-agent
-Restart=always
-RestartSec=3
-[Install]
-WantedBy=multi-user.target
-UNIT
-systemctl daemon-reload; systemctl enable --now yusui-agent >/dev/null 2>&1; systemctl restart yusui-agent" 2>&1 | tail -0
+say "5/7  run yusui-agent in the agent peer's netns (overlay mode → server $SRV_OIP:9091)"
+# Shares demo-agent's netns (--network container:demo-agent), so it reads that
+# peer's wt0 and binds per-ticket forwarders on the overlay IP. ENFORCER=forward
+# is the cross-platform userspace L4 forwarder (no nftables). netbird overlay mode
+# with no setup key just reads wt0 — the daemon is already up in demo-agent.
+docker run -d --name demo-yusui-agent --network "container:demo-agent" --restart unless-stopped \
+  -e YUSUI_SERVER_GRPC="$SRV_OIP:9091" -e YUSUI_PROJECT="$PROJECT" -e YUSUI_REGISTER_TOKEN="$REGTOK" \
+  -e YUSUI_HOSTNAME=yusui-agent -e YUSUI_ENFORCER=forward -e YUSUI_OVERLAY=netbird -e YUSUI_NB_IFACE=wt0 \
+  yusui-agent:latest >/dev/null
 
 say "6/7  seed the catalog (project, approve the agent, assets, credentials)"
 API="http://localhost:$WEB_PORT"; j() { python3 -c 'import sys,json;print(json.load(sys.stdin)[sys.argv[1]])' "$1"; }

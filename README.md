@@ -2,6 +2,8 @@
 
 工单驱动的零信任运维接入平台。设计文档见 [DESIGN.md](DESIGN.md) 与 [docs/](docs/)。
 
+📖 **文档站(部署 / 接入指南)**:<https://catundercar.github.io/yusui/> — 主服务部署、**Agent 一条命令接入**、概念与架构。源码在 [`site/`](site/)。
+
 ## 结构
 - `server/` — YuSui Server (Go)：API / Policy Engine / Web Shell / Adapters
 - `agent/`  — YuSui Agent (Go)：routing peer + 本地 nftables ACL（M3 起）

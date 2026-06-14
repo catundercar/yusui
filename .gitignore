@@ -23,3 +23,8 @@ web/playwright-report/
 # playwright artifacts
 .playwright-mcp/
 /dist/
+
+# docs site (VitePress)
+site/node_modules/
+site/.vitepress/dist/
+site/.vitepress/cache/
